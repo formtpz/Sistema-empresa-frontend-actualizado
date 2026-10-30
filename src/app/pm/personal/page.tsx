@@ -100,7 +100,7 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    setProject(normalizeProject(new URLSearchParams(window.location.search).get("project")));
+    void Promise.resolve().then(() => setProject(normalizeProject(new URLSearchParams(window.location.search).get("project"))));
   }, []);
 
   useEffect(() => {
