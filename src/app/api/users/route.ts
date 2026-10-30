@@ -66,7 +66,7 @@ export async function POST(req: Request) {
   const email = String(body?.email ?? "").trim();
   const userRole = String(body?.role ?? "").trim().toUpperCase();
   const password = String(body?.password ?? "");
-  const active = Boolean(body?.active ?? true);
+  const active = body?.active ?? true;
   const supervisor = String(body?.supervisor ?? "").trim();
   const cedula = String(body?.cedula ?? "").trim();
   const puesto = String(body?.puesto ?? "").trim();
@@ -74,13 +74,17 @@ export async function POST(req: Request) {
   const startDate = parseDate(body?.start_date);
   const projectCode = String(body?.projectCode ?? "").trim().toUpperCase();
 
-  if (!username || !name || !isRole(userRole)) {
+  if (!username || !name || !isRole(userRole) || typeof active !== "boolean" || !Number.isFinite(vacacionesSaldo) || password.length > 1024) {
     return NextResponse.json({ message: "Faltan datos." }, { status: 400 });
   }
   if (projectCode && !isProjectCode(projectCode)) {
     return NextResponse.json({ message: "Proyecto invalido." }, { status: 400 });
   }
   const parsedProjectCode = projectCode && isProjectCode(projectCode) ? projectCode : null;
+  const session = await getSession();
+  if (session?.username === username && (!active || userRole !== "ADMIN")) {
+    return NextResponse.json({message:"No puedes desactivar tu propio acceso administrativo"},{status:400});
+  }
 
   const client = await getPool().connect();
   try {
