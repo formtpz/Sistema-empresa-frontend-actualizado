@@ -1,93 +1,43 @@
 export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
-import { PermisoEstado, PermisoTipo } from "@prisma/client";
+import { query } from "@/lib/db";
+import { getSession } from "@/lib/session";
 
-function getSecrets() {
-  return [process.env.JWT_SECRET, process.env.AUTH_SECRET, "dev-secret"]
-    .filter(Boolean)
-    .map((secret) => new TextEncoder().encode(secret));
-}
-
-async function auth() {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  for (const secret of getSecrets()) {
-    try {
-      const { payload } = await jwtVerify(token, secret);
-      const username = String(payload.sub ?? payload.username ?? "").trim();
-      const role = String(payload.role ?? "").toUpperCase();
-      if (!username) return null;
-      return { username, role };
-    } catch {
-      // Try the next local secret. This keeps older browser sessions valid.
-    }
-  }
-
-  return null;
-}
-
-function isNonPersonalRole(role: string) {
-  return role === "RH" || role === "GERENCIA";
-}
+const tipos = new Set(["VACACIONES", "PERSONAL", "MEDICO", "TRAMITE", "OTRO"]);
+function restricted(role: string) { return role === "RH" || role === "GERENCIA"; }
 
 export async function GET() {
-  const a = await auth();
-  if (!a) return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  if (isNonPersonalRole(a.role)) {
-    return NextResponse.json(
-      { message: "Este perfil no tiene solicitudes personales de permisos." },
-      { status: 403 }
-    );
+  const session = await getSession();
+  if (!session) return NextResponse.json({ message: "No autenticado" }, { status: 401 });
+  if (restricted(session.role)) return NextResponse.json({ message: "Este perfil no tiene solicitudes personales de permisos." }, { status: 403 });
+  try {
+    const permisos = await query("SELECT * FROM public.permisos WHERE username=$1 ORDER BY created_at DESC", [session.username]);
+    return NextResponse.json({ permisos });
+  } catch {
+    return NextResponse.json({ message: "Error consultando permisos" }, { status: 500 });
   }
-
-  const permisos = await prisma.permiso.findMany({
-    where: { username: a.username },
-    orderBy: { created_at: "desc" },
-  });
-
-  return NextResponse.json({ permisos });
 }
 
 export async function POST(req: Request) {
-  const a = await auth();
-  if (!a) return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  if (isNonPersonalRole(a.role)) {
-    return NextResponse.json(
-      { message: "Este perfil no puede solicitar permisos personales." },
-      { status: 403 }
-    );
-  }
-
+  const session = await getSession();
+  if (!session) return NextResponse.json({ message: "No autenticado" }, { status: 401 });
+  if (restricted(session.role)) return NextResponse.json({ message: "Este perfil no puede solicitar permisos personales." }, { status: 403 });
   const body = await req.json().catch(() => null);
-
   const tipo = String(body?.tipo ?? "OTRO").toUpperCase();
-  const fecha_inicio = String(body?.fecha_inicio ?? "");
-  const fecha_fin = String(body?.fecha_fin ?? "");
-  const motivo = String(body?.motivo ?? "");
-
-  if (!fecha_inicio || !fecha_fin || !motivo) {
-    return NextResponse.json({ message: "Faltan datos del permiso." }, { status: 400 });
+  const inicio = String(body?.fecha_inicio ?? "");
+  const fin = String(body?.fecha_fin ?? "");
+  const motivo = String(body?.motivo ?? "").trim();
+  const a = new Date(inicio), b = new Date(fin);
+  if (!motivo || motivo.length > 5000 || !inicio || !fin || !Number.isFinite(a.getTime()) || !Number.isFinite(b.getTime()) || a > b) {
+    return NextResponse.json({ message: "Datos del permiso inválidos" }, { status: 400 });
   }
-
-  const permisoTipo = Object.values(PermisoTipo).includes(tipo as PermisoTipo)
-    ? (tipo as PermisoTipo)
-    : PermisoTipo.OTRO;
-
-  const permiso = await prisma.permiso.create({
-    data: {
-      username: a.username,
-      tipo: permisoTipo,
-      fecha_inicio: new Date(fecha_inicio),
-      fecha_fin: new Date(fecha_fin),
-      motivo,
-      estado: PermisoEstado.ENVIADO,
-    },
-  });
-
-  return NextResponse.json({ ok: true, permiso });
+  try {
+    const rows = await query(
+      "INSERT INTO public.permisos (username,tipo,fecha_inicio,fecha_fin,motivo,estado) VALUES ($1,$2,$3,$4,$5,'ENVIADO') RETURNING *",
+      [session.username, tipos.has(tipo) ? tipo : "OTRO", a, b, motivo]
+    );
+    return NextResponse.json({ ok: true, permiso: rows[0] });
+  } catch {
+    return NextResponse.json({ message: "No se pudo guardar el permiso" }, { status: 500 });
+  }
 }
