@@ -1,6 +1,6 @@
-import { ProjectCode } from "@prisma/client";
+type ProjectCode = "COLOMBIA" | "PERU" | "ITALIA" | "GENERAL";
 
-const PROJECT_CODES = new Set<string>(Object.values(ProjectCode));
+const PROJECT_CODES = new Set<string>(["COLOMBIA", "PERU", "ITALIA", "GENERAL"]);
 
 export function parseProjectCode(value: string): ProjectCode | null {
   const code = value.toUpperCase();
