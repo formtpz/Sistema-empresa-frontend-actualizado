@@ -1,8 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 type SessionUser = {
@@ -23,22 +22,7 @@ type HorasDiaInput = {
   justificacion?: unknown;
 };
 
-function getSecret() {
-  const secret = process.env.JWT_SECRET || "dev-secret";
-  return new TextEncoder().encode(secret);
-}
-
-async function getSessionUser(): Promise<SessionUser | null> {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  const { payload } = await jwtVerify(token, getSecret());
-  const username = String(payload.sub ?? payload.username ?? "").trim();
-  const role = String(payload.role ?? "").toUpperCase();
-
-  if (!username) return null;
-  return { username, role };
-}
+const getSessionUser = getSession;
 
 function normalizeText(value: string) {
   return value
