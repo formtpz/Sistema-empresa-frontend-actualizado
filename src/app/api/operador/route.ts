@@ -1,9 +1,8 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
 
 type SessionUser = {
   username: string;
@@ -42,22 +41,7 @@ type HorasExtraRow = {
   nocturnas_feriado: unknown;
 };
 
-function getSecret() {
-  const secret = process.env.JWT_SECRET || "dev-secret";
-  return new TextEncoder().encode(secret);
-}
-
-async function getSessionUser(): Promise<SessionUser | null> {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  const { payload } = await jwtVerify(token, getSecret());
-  const username = String(payload.sub ?? payload.username ?? "").trim();
-  const role = String(payload.role ?? "").toUpperCase();
-
-  if (!username) return null;
-  return { username, role };
-}
+const getSessionUser = getSession;
 
 function monthsDiff(from: Date, to: Date) {
   let months =
