@@ -43,3 +43,9 @@
 - Validar en pruebas: dos navegadores independientes, expiración a las 8 horas, logout de uno sin afectar al otro, revocación de usuario desactivado, cookie persistente.
 - El cierre de sesión no depende de mantener conexiones SQL abiertas. `pg.Pool` sigue administrando las conexiones.
 - En el despliegue, los JWT antiguos no serán aceptados: los usuarios tendrán que volver a iniciar sesión una vez.
+
+## Avance de autorización en rutas
+- Migradas a comprobación actual en PostgreSQL: `api/permisos`, `api/rrhh/permisos`, `api/users`, `api/users/deactivate`, `api/admin/bd`, `api/coordinador`, y las dos rutas `api/rrhh/permisos-equipo`.
+- **No considerar completada la autorización**: siguen pendientes rutas de bonos, horas extra, PM, gerencia, perfiles y otros endpoints; auditar todas las rutas antes del merge.
+- La autorización actual utiliza funciones SQL invocadas desde backend con el username de sesión verificado. No equivale a RLS extremo a extremo; no exponer el usuario DB backend ni permitir consultas directas desde navegador.
+- Requerido antes de producción: revisar alcance de equipos y proyectos, permisos de funciones, privilegios y políticas RLS del rol backend, concurrencia y revocación, rate limiting de login, pruebas de integración y CI.
