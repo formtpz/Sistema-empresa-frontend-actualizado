@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireRoleFromRequest } from "@/lib/auth";
+import { requirePermissionFromRequest } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await requireRoleFromRequest(req, ["PM", "GERENCIA", "ADMIN"]);
+  const auth = await requirePermissionFromRequest(req, "reports.read_all");
   if (!auth.ok) {
     return NextResponse.json({ message: auth.message }, { status: auth.status });
   }
