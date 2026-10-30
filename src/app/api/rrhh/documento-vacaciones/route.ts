@@ -43,7 +43,7 @@ export async function GET(req: Request) {
   const id = searchParams.get("id") ?? "";
 
   const [row] = await query<{id:string;username:string;tipo:string;estado:string;fecha_inicio:Date;fecha_fin:Date;motivo:string;user_name:string;puesto:string|null;vacaciones_saldo:string|null;project_name:string|null}>(
-    'SELECT p.id,p.username,p.tipo,p.estado,p.fecha_inicio,p.fecha_fin,p.motivo,u.name AS user_name,e.puesto,e.vacaciones_saldo,pr.name AS project_name FROM public.permisos p JOIN public.users u ON u.username=p.username LEFT JOIN public.employees e ON e.username=p.username LEFT JOIN public.projects pr ON pr.id=e."projectId" WHERE p.id=$1 AND public.app_can_access_request($2,p.username,'permissions.read_team')',[id,session.username]);
+    'SELECT p.id,p.username,p.tipo,p.estado,p.fecha_inicio,p.fecha_fin,p.motivo,u.name AS user_name,e.puesto,e.vacaciones_saldo,pr.name AS project_name FROM public.permisos p JOIN public.users u ON u.username=p.username LEFT JOIN public.employees e ON e.username=p.username LEFT JOIN public.projects pr ON pr.id=e."projectId" WHERE p.id=$1 AND public.app_can_access_request($2,p.username,\'permissions.read_team\')',[id,session.username]);
   const permiso = row ? {...row,fecha_inicio:new Date(row.fecha_inicio),fecha_fin:new Date(row.fecha_fin),user:{name:row.user_name,employee:{puesto:row.puesto,vacaciones_saldo:row.vacaciones_saldo,project:{name:row.project_name}}}} : null;
 
   if (!permiso) return NextResponse.json({ message: "Permiso no encontrado." }, { status: 404 });
