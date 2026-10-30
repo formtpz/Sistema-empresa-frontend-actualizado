@@ -1,70 +1,29 @@
 export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { STORE, Permiso } from "../../../../lib/rrhhStore";
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
 
-function getSecret() {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) throw new Error("AUTH_SECRET no está configurado.");
-  return new TextEncoder().encode(secret);
-}
-
-async function getUsername() {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  try {
-    const { payload } = await jwtVerify(token, getSecret());
-    return String(payload.sub ?? "");
-  } catch {
-    return null;
-  }
-}
-
+const tipos = new Set(["VACACIONES","PERSONAL","MEDICO","TRAMITE","OTRO"]);
 export async function GET() {
-  const username = await getUsername();
-  if (!username) {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  }
-
-  const mine = STORE
-    .filter((p) => p.username === username)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at));
-
-  return NextResponse.json({ permisos: mine });
+  const session = await getSession();
+  if (!session) return NextResponse.json({message:"No autenticado"},{status:401});
+  try {
+    const rows = await query("SELECT id,username,tipo,fecha_inicio,fecha_fin,motivo,estado,created_at FROM public.permisos WHERE username=$1 ORDER BY created_at DESC",[session.username]);
+    return NextResponse.json({permisos:rows.map(row=>({...row,estado:row.estado==="ENVIADO"?"Enviado":row.estado==="APROBADO"?"Aprobado":"Rechazado"}))});
+  } catch { return NextResponse.json({message:"No se pudieron cargar permisos"},{status:500}); }
 }
-
-export async function POST(req: Request) {
-  const username = await getUsername();
-  if (!username) {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  }
-
-  const body = await req.json().catch(() => null);
-
-  const tipo = body?.tipo as Permiso["tipo"];
-  const fecha_inicio = String(body?.fecha_inicio ?? "");
-  const fecha_fin = String(body?.fecha_fin ?? "");
-  const motivo = String(body?.motivo ?? "").trim();
-
-  if (!tipo || !fecha_inicio || !fecha_fin || !motivo) {
-    return NextResponse.json({ message: "Faltan datos del permiso." }, { status: 400 });
-  }
-
-  const permiso: Permiso = {
-    id: crypto.randomUUID(),
-    username,
-    tipo,
-    fecha_inicio,
-    fecha_fin,
-    motivo,
-    estado: "Enviado",
-    created_at: new Date().toISOString(),
-  };
-
-  STORE.push(permiso);
-
-  return NextResponse.json({ ok: true, permiso });
+export async function POST(req:Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({message:"No autenticado"},{status:401});
+  const body = await req.json().catch(()=>null);
+  const tipo = String(body?.tipo??"").toUpperCase();
+  const inicio = String(body?.fecha_inicio??"");
+  const fin = String(body?.fecha_fin??"");
+  const motivo = String(body?.motivo??"").trim();
+  const start = new Date(inicio), end = new Date(fin);
+  if (!tipos.has(tipo) || !inicio || !fin || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start>end || !motivo || motivo.length>5000) return NextResponse.json({message:"Datos del permiso inválidos"},{status:400});
+  try {
+    const rows=await query("INSERT INTO public.permisos(username,tipo,fecha_inicio,fecha_fin,motivo,estado) VALUES($1,$2,$3,$4,$5,'ENVIADO') RETURNING id,username,tipo,fecha_inicio,fecha_fin,motivo,estado,created_at",[session.username,tipo,start,end,motivo]);
+    return NextResponse.json({ok:true,permiso:{...rows[0],estado:"Enviado"}});
+  } catch { return NextResponse.json({message:"No se pudo guardar el permiso"},{status:500}); }
 }

@@ -1,78 +1,28 @@
 export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
-import { withTimeout } from "@/lib/timeout";
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
 
-function getSecret() {
-  const secret = process.env.JWT_SECRET || "dev-secret";
-  return new TextEncoder().encode(secret);
-}
-
+type Row = { nombre:string; personal_total:number; activos:number; operadores:number; coordinadores:number; rh:number; pm:number };
 export async function GET() {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  }
-
+  const session=await getSession();
+  if(!session)return NextResponse.json({message:"No autenticado"},{status:401});
+  if(!["GERENCIA","PM","ADMIN"].includes(session.role))return NextResponse.json({message:"No autorizado"},{status:403});
   try {
-    const { payload } = await jwtVerify(token, getSecret());
-
-    const role = String(payload.role ?? "").toUpperCase();
-    if (role !== "GERENCIA" && role !== "PM" && role !== "ADMIN") {
-      return NextResponse.json({ message: "No autorizado" }, { status: 403 });
-    }
-
-    const projects = await withTimeout(
-      prisma.project.findMany({
-        where: { code: { not: "GENERAL" } },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true },
-      })
+    const proyectos=await query<Row>(
+      "SELECT p.name AS nombre, COUNT(e.id)::int AS personal_total, "+
+      "COUNT(e.id) FILTER (WHERE u.active)::int AS activos, "+
+      "COUNT(e.id) FILTER (WHERE u.active AND u.role='OPERADOR')::int AS operadores, "+
+      "COUNT(e.id) FILTER (WHERE u.active AND u.role='COORDINACION')::int AS coordinadores, "+
+      "COUNT(e.id) FILTER (WHERE u.active AND u.role='RH')::int AS rh, "+
+      "COUNT(e.id) FILTER (WHERE u.active AND u.role='PM')::int AS pm "+
+      "FROM public.projects p LEFT JOIN public.employees e ON e.\"projectId\"=p.id "+
+      "LEFT JOIN public.users u ON u.username=e.username "+
+      "WHERE p.code::text <> 'GENERAL' GROUP BY p.id,p.name ORDER BY p.name"
     );
-
-    const proyectos = await withTimeout(
-      Promise.all(
-        projects.map(async (project) => {
-          const whereProject = { projectId: project.id };
-          const [personalTotal, activos, operadores, coordinadores, rh, pm] =
-            await Promise.all([
-              prisma.employee.count({ where: whereProject }),
-              prisma.employee.count({ where: { ...whereProject, user: { active: true } } }),
-              prisma.employee.count({
-                where: { ...whereProject, user: { active: true, role: "OPERADOR" } },
-              }),
-              prisma.employee.count({
-                where: { ...whereProject, user: { active: true, role: "COORDINACION" } },
-              }),
-              prisma.employee.count({
-                where: { ...whereProject, user: { active: true, role: "RH" } },
-              }),
-              prisma.employee.count({
-                where: { ...whereProject, user: { active: true, role: "PM" } },
-              }),
-            ]);
-
-          return {
-            nombre: project.name,
-            personal_total: personalTotal,
-            activos,
-            operadores,
-            coordinadores,
-            rh,
-            pm,
-          };
-        })
-      )
-    );
-
-    return NextResponse.json({ proyectos });
-  } catch (err: unknown) {
-    return NextResponse.json(
-      { message: "Token invalido", error: String(err) },
-      { status: 401 }
-    );
+    return NextResponse.json({proyectos});
+  }catch(error){
+    console.error("Proyectos gerencia:",error);
+    return NextResponse.json({message:"Error cargando proyectos"},{status:500});
   }
 }

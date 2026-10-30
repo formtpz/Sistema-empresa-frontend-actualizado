@@ -1,46 +1,27 @@
 export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { ensureUser } from "../../../../lib/rrhhData";
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
 
-function getSecret() {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) throw new Error("AUTH_SECRET no está configurado.");
-  return new TextEncoder().encode(secret);
-}
-
-async function getSession() {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  try {
-    const { payload } = await jwtVerify(token, getSecret());
-    return {
-      username: String(payload.sub ?? ""),
-      name: String(payload.name ?? ""),
-      role: String(payload.role ?? ""),
-    };
-  } catch {
-    return null;
-  }
-}
-
+type Profile = { username:string; name:string; role:string; puesto:string|null; vacaciones_saldo:string|null; project:string|null };
 export async function GET() {
-  const session = await getSession();
-  if (!session?.username) {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  }
-
-  const rrhh = ensureUser(session.username);
-  const vacaciones_disponibles = Math.max(0, rrhh.vacaciones_total - rrhh.vacaciones_usadas);
-
+ const session=await getSession();
+ if(!session) return NextResponse.json({message:"No autenticado"},{status:401});
+ try {
+  const rows=await query<Profile>(
+   `SELECT u.username,u.name,u.role::text AS role,e.puesto,e.vacaciones_saldo,p.name AS project
+     FROM public.users u LEFT JOIN public.employees e ON e.username=u.username
+     LEFT JOIN public.projects p ON p.id=e."projectId" WHERE u.username=$1 LIMIT 1`,[session.username]);
+  const user=rows[0];
+  if(!user) return NextResponse.json({message:"Usuario no encontrado"},{status:404});
+  const saldo=Number(user.vacaciones_saldo??0);
   return NextResponse.json({
-    user: session,
-    rrhh: {
-      ...rrhh,
-      vacaciones_disponibles,
-    },
+   user:{username:user.username,name:user.name,role:user.role},
+   rrhh:{username:user.username,vacaciones_total:saldo,vacaciones_usadas:0,
+    vacaciones_disponibles:Math.max(0,saldo),puesto:user.puesto??"",area:user.project??"General"}
   });
+ }catch(error){
+  console.error("Error cargando perfil RRHH:",error);
+  return NextResponse.json({message:"Error consultando perfil"},{status:500});
+ }
 }

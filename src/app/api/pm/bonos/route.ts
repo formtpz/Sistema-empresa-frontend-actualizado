@@ -1,108 +1,21 @@
+export const runtime="nodejs";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getErrorMessage } from "@/lib/errors";
-import { parseProjectCode } from "@/lib/projects";
+import { requireRoleFromRequest } from "@/lib/auth";
+import { query } from "@/lib/db";
 
-function parsePeriod(period: string) {
-  // period esperado: "2026-02"
-  const [y, m] = period.split("-");
-  const year = Number(y);
-  const month = Number(m);
-  if (!year || !month || month < 1 || month > 12) return null;
-  return { year, month };
-}
-
-export async function GET(req: Request) {
+type BonusRow = { id:string; employeeId:number; username:string; name:string; project:string|null; year:number; month:number; total:string; productividad:string; calidad:string; qc:string; validacion:string; supervision:string; calidad_sup:string; supervision_sig:string; calidad_sig:string; bono_fijo:string };
+const fields=["total","productividad","calidad","qc","validacion","supervision","calidad_sup","supervision_sig","calidad_sig","bono_fijo"] as const;
+export async function GET(req:Request) {
+  const auth=await requireRoleFromRequest(req,["PM","GERENCIA","ADMIN"]);
+  if(!auth.ok) return NextResponse.json({ok:false,error:auth.message},{status:auth.status});
+  const sp=new URL(req.url).searchParams;
+  const project=(sp.get("project")??"GENERAL").toUpperCase();
+  const period=sp.get("period")??"";
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(period) || !["GENERAL","COLOMBIA","PERU","ITALIA"].includes(project)) return NextResponse.json({ok:false,error:"Periodo o proyecto inválido"},{status:400});
+  const [year,month]=period.split("-").map(Number);
   try {
-    const { searchParams } = new URL(req.url);
-    const project = (searchParams.get("project") ?? "GENERAL").toUpperCase();
-    const period = searchParams.get("period");
-
-    if (!period) {
-      return NextResponse.json(
-        { ok: false, error: "Falta 'period' (ej: 2026-02)" },
-        { status: 400 }
-      );
-    }
-
-    const parsed = parsePeriod(period);
-    if (!parsed) {
-      return NextResponse.json(
-        { ok: false, error: "Formato inválido de 'period'. Usa YYYY-MM (ej: 2026-02)" },
-        { status: 400 }
-      );
-    }
-
-    const { year, month } = parsed;
-    const projectCode = parseProjectCode(project);
-
-    // Filtro por proyecto (si es GENERAL, no filtra)
-    const projectFilter =
-      project === "GENERAL" || !projectCode
-        ? {}
-        : {
-            employee: {
-              project: { code: projectCode },
-            },
-          };
-
-    const rows = await prisma.bonosMes.findMany({
-      where: {
-        year,
-        month,
-        ...projectFilter,
-      },
-      include: {
-        employee: {
-          include: {
-            user: true,
-            project: true,
-          },
-        },
-      },
-      orderBy: {
-        total: "desc",
-      },
-    });
-
-    const items = rows.map((b) => ({
-      id: b.id,
-      employeeId: b.employeeId,
-      username: b.employee.user.username,
-      name: b.employee.user.name,
-      project: b.employee.project?.code ?? "GENERAL",
-
-      year: b.year,
-      month: b.month,
-
-      total: Number(b.total),
-      productividad: Number(b.productividad),
-      calidad: Number(b.calidad),
-      qc: Number(b.qc),
-      validacion: Number(b.validacion),
-      supervision: Number(b.supervision),
-      calidad_sup: Number(b.calidad_sup),
-      supervision_sig: Number(b.supervision_sig),
-      calidad_sig: Number(b.calidad_sig),
-      bono_fijo: Number(b.bono_fijo),
-    }));
-
-    const total = items.reduce((acc, x) => acc + (x.total || 0), 0);
-
-    return NextResponse.json({
-      ok: true,
-      project,
-      period,
-      year,
-      month,
-      total,
-      items,
-    });
-  } catch (error: unknown) {
-    console.error("ERROR /api/pm/bonos:", error);
-    return NextResponse.json(
-      { ok: false, error: getErrorMessage(error, "Error interno cargando bonos") },
-      { status: 500 }
-    );
-  }
+    const rows=await query<BonusRow>(`SELECT b.*,u.username,u.name,p.code::text AS project FROM public.bonos_mes b JOIN public.employees e ON e.id=b."employeeId" JOIN public.users u ON u.username=e.username LEFT JOIN public.projects p ON p.id=e."projectId" WHERE b.year=$1 AND b.month=$2 AND ($3='GENERAL' OR p.code::text=$3) ORDER BY b.total DESC`,[year,month,project]);
+    const items=rows.map(row=>{const result={...row,project:row.project??"GENERAL"} as Record<string,unknown>;for(const field of fields) result[field]=Number(row[field]);return result;});
+    return NextResponse.json({ok:true,project,period,year,month,total:items.reduce((s,r)=>s+Number(r.total),0),items});
+  } catch(error) { console.error("Error cargando bonos:",error);return NextResponse.json({ok:false,error:"Error interno cargando bonos"},{status:500}); }
 }
