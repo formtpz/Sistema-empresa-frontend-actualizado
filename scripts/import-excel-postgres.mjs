@@ -37,6 +37,7 @@ async function run(){
     [username,String(r.name??username).trim()||username,role(r.role),active(r.active),hash]);
    stats.users+=result.rowCount;
   }
+  await client.query("INSERT INTO public.projects(code,name) VALUES ('COLOMBIA','Colombia') ON CONFLICT(code) DO NOTHING");
   const project=await client.query("SELECT id FROM public.projects WHERE code='COLOMBIA' LIMIT 1");
   const projectId=project.rows[0]?.id??null;
   for(const r of rows("COL.xlsx","Hoja2")){
