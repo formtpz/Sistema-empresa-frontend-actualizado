@@ -206,8 +206,9 @@ export async function GET() {
       vacaciones_actual: vacacionesActual,
       equipo_horas_extra: await getEquipoHorasExtra(session.username),
     });
-  } catch {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
+  } catch (error) {
+    console.error("Error consultando operador",error);
+    return NextResponse.json({ message: "Error consultando perfil" }, { status: 500 });
   }
 }
 
