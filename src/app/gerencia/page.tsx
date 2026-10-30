@@ -64,7 +64,7 @@ export default function GerenciaPage() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   const totals = useMemo(() => {
