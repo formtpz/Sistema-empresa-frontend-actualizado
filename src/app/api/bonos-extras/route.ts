@@ -30,6 +30,8 @@ export async function GET(req: Request) {
     const session=await getSession();
     if(!session)return NextResponse.json({authenticated:false},{status:401});
     const username=session.username;
+    const [access]=await query<{allowed:boolean}>("SELECT public.app_has_permission($1,$2) AS allowed",[username,"reports.read_own"]);
+    if(!access?.allowed)return NextResponse.json({message:"No autorizado"},{status:403});
     const [user]=await query<{username:string;name:string;role:string;active:boolean}>(
       "SELECT username,name,role,active FROM public.users WHERE username=$1",[username]);
     if(!user)return NextResponse.json({authenticated:false},{status:401});
