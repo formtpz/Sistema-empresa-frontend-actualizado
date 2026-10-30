@@ -31,3 +31,15 @@
 6. Un usuario desactivado no puede acceder a solicitudes.
 7. Un permiso nuevo hereda `projectId` del empleado.
 8. Sin aplicar la migración, el backend debe fallar cerrado (500), no devolver solicitudes sin filtro.
+
+## Sesiones por dispositivo (incluidas en este PR)
+- Ejecutar también `sql/20261030_app_sessions.sql` **antes** de desplegar el código de autenticación.
+- Cada login crea una sesión independiente con vencimiento absoluto de 8 horas.
+- Refrescar o reabrir el navegador no prolonga la sesión; una segunda PC no revoca la primera.
+- Logout revoca únicamente la sesión del dispositivo actual; desactivar el usuario invalida todas las sesiones en las verificaciones.
+- El servidor conserva el hash SHA-256 del token aleatorio de 256 bits; la cookie HttpOnly contiene el token original.
+- Contraseñas existentes continúan con bcrypt; JWT deja de usarse para sesiones nuevas. `JWT_SECRET` ya no es requerido por las rutas migradas.
+- Aplicar y comprobar privilegios/RLS de `app_sessions` para el rol backend; si no puede leer o escribir, login y validación fallarán.
+- Validar en pruebas: dos navegadores independientes, expiración a las 8 horas, logout de uno sin afectar al otro, revocación de usuario desactivado, cookie persistente.
+- El cierre de sesión no depende de mantener conexiones SQL abiertas. `pg.Pool` sigue administrando las conexiones.
+- En el despliegue, los JWT antiguos no serán aceptados: los usuarios tendrán que volver a iniciar sesión una vez.
