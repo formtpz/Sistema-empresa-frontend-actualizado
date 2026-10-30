@@ -2,7 +2,6 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { prisma } from "@/lib/prisma";
 import { query, getPool } from "@/lib/db";
 
 type SessionUser = {
@@ -194,10 +193,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: "Datos invalidos." }, { status: 400 });
     }
 
-    const employee = await prisma.employee.findUnique({
-      where: { username: parsed.employeeUsername },
-      select: { id: true, supervisor: true },
-    });
+    const [employee] = await query<{id:number;supervisor:string|null}>(
+      "SELECT id,supervisor FROM public.employees WHERE username=$1",[parsed.employeeUsername]);
 
     if (!employee || !supervisorMatches(session.username, employee.supervisor)) {
       return NextResponse.json(
@@ -206,44 +203,16 @@ export async function POST(req: Request) {
       );
     }
 
-    await prisma.horasExtraDia.upsert({
-      where: {
-        horas_extra_dia_unique: {
-          employeeId: employee.id,
-          date: parsed.date,
-        },
-      },
-      update: {
-        year: parsed.year,
-        month: parsed.month,
-        day: parsed.day,
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-        justificacion: parsed.justificacion,
-      },
-      create: {
-        employeeId: employee.id,
-        date: parsed.date,
-        year: parsed.year,
-        month: parsed.month,
-        day: parsed.day,
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-        justificacion: parsed.justificacion,
-      },
-    });
-
-    await recalculateMonthly(employee.id, parsed.year, parsed.month);
+    const client=await getPool().connect();
+    try{
+      await client.query("BEGIN");
+      await client.query(
+        'INSERT INTO public.horas_extra_dia("employeeId",date,year,month,day,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado,justificacion) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT ("employeeId",date) DO UPDATE SET year=EXCLUDED.year,month=EXCLUDED.month,day=EXCLUDED.day,total=EXCLUDED.total,ordinarias=EXCLUDED.ordinarias,feriados=EXCLUDED.feriados,diurnas=EXCLUDED.diurnas,nocturnas=EXCLUDED.nocturnas,diurnas_feriado=EXCLUDED.diurnas_feriado,nocturnas_feriado=EXCLUDED.nocturnas_feriado,justificacion=EXCLUDED.justificacion,updated_at=CURRENT_TIMESTAMP',
+        [employee.id,parsed.date,parsed.year,parsed.month,parsed.day,parsed.total,parsed.ordinarias,parsed.feriados,parsed.diurnas,parsed.nocturnas,parsed.diurnas_feriado,parsed.nocturnas_feriado,parsed.justificacion]);
+      await recalculateMonthly(client,employee.id,parsed.year,parsed.month);
+      await client.query("COMMIT");
+    }catch(error){await client.query("ROLLBACK");throw error;}
+    finally{client.release();}
 
     return NextResponse.json({
       ...(await buildResponse(session.username, parsed.year, parsed.month)),
