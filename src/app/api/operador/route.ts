@@ -172,21 +172,10 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado" }, { status: 403 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { username: session.username },
-      select: { username: true, name: true, email: true, role: true },
-    });
-
-    const emp = await prisma.employee.findUnique({
-      where: { username: session.username },
-      select: {
-        cedula: true,
-        puesto: true,
-        supervisor: true,
-        start_date: true,
-        vacaciones_saldo: true,
-      },
-    });
+    const [user]=await query<{username:string;name:string;email:string|null;role:string}>(
+      "SELECT username,name,email,role FROM public.users WHERE username=$1",[session.username]);
+    const [emp]=await query<{cedula:string|null;puesto:string|null;supervisor:string|null;start_date:Date|null;vacaciones_saldo:string}>(
+      "SELECT cedula,puesto,supervisor,start_date,vacaciones_saldo FROM public.employees WHERE username=$1",[session.username]);
 
     if (!user) {
       return NextResponse.json({ message: "Usuario no existe" }, { status: 404 });
