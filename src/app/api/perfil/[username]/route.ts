@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { query } from "@/lib/db";
+import { getSession } from "@/lib/session";
 
 function monthsDiffByAnniversary(startDate: Date, fromDate: Date, toDate: Date) {
   if (toDate < fromDate) return 0;
@@ -44,13 +45,17 @@ export async function GET(
       );
     }
 
-    const user = await prisma.user.findUnique({
-      where: { username: userNameDecoded },
-      include: {
-        employee: true,
-        permisos: true,
-      },
-    });
+    const session = await getSession();
+    if (!session) return NextResponse.json({message:"No autenticado"},{status:401});
+    if (session.username !== userNameDecoded && !["ADMIN","RH","COORDINACION","PM","GERENCIA"].includes(session.role))
+      return NextResponse.json({message:"No autorizado"},{status:403});
+    const users = await query<{username:string;name:string;role:string}>(
+      "SELECT username,name,role FROM public.users WHERE username=$1 LIMIT 1",[userNameDecoded]);
+    const user = users[0];
+    const [employee] = await query<{start_date:Date|null;vacaciones_saldo:string}>(
+      "SELECT * FROM public.employees WHERE username=$1 LIMIT 1",[userNameDecoded]);
+    const permisos = await query(
+      "SELECT * FROM public.permisos WHERE username=$1 ORDER BY created_at DESC",[userNameDecoded]);
 
     if (!user) {
       return NextResponse.json(
@@ -62,9 +67,9 @@ export async function GET(
     const corte = new Date("2026-01-19T00:00:00.000Z");
     const hoy = new Date();
 
-    let vacacionesActual = Number(user.employee?.vacaciones_saldo ?? 0);
+    let vacacionesActual = Number(employee?.vacaciones_saldo ?? 0);
 
-    if (user.employee?.start_date) {
+    if (employee?.start_date) {
       const extra = monthsDiffByAnniversary(user.employee.start_date, corte, hoy);
       vacacionesActual += extra;
     }
@@ -74,10 +79,10 @@ export async function GET(
       name: user.name,
       role: user.role,
       employee: {
-        ...user.employee,
+        ...employee,
         vacaciones_actual: vacacionesActual,
       },
-      permisos: user.permisos,
+      permisos,
     });
   } catch (error: unknown) {
     return NextResponse.json(
