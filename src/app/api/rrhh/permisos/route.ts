@@ -3,10 +3,12 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { query } from "@/lib/db";
 
+async function permitted(username:string,code:string){const [r]=await query<{allowed:boolean}>("SELECT public.app_has_permission($1,$2) AS allowed",[username,code]);return r?.allowed===true;}
 const tipos = new Set(["VACACIONES","PERSONAL","MEDICO","TRAMITE","OTRO"]);
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({message:"No autenticado"},{status:401});
+  if (!(await permitted(session.username,"permissions.read_own"))) return NextResponse.json({message:"No autorizado"},{status:403});
   try {
     const rows = await query("SELECT id,username,tipo,fecha_inicio,fecha_fin,motivo,estado,created_at FROM public.permisos WHERE username=$1 ORDER BY created_at DESC",[session.username]);
     return NextResponse.json({permisos:rows.map(row=>({...row,estado:row.estado==="ENVIADO"?"Enviado":row.estado==="APROBADO"?"Aprobado":"Rechazado"}))});
@@ -15,6 +17,7 @@ export async function GET() {
 export async function POST(req:Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({message:"No autenticado"},{status:401});
+  if (!(await permitted(session.username,"permissions.create_own"))) return NextResponse.json({message:"No autorizado"},{status:403});
   const body = await req.json().catch(()=>null);
   const tipo = String(body?.tipo??"").toUpperCase();
   const inicio = String(body?.fecha_inicio??"");
