@@ -49,3 +49,9 @@
 - **No considerar completada la autorización**: siguen pendientes rutas de bonos, horas extra, PM, gerencia, perfiles y otros endpoints; auditar todas las rutas antes del merge.
 - La autorización actual utiliza funciones SQL invocadas desde backend con el username de sesión verificado. No equivale a RLS extremo a extremo; no exponer el usuario DB backend ni permitir consultas directas desde navegador.
 - Requerido antes de producción: revisar alcance de equipos y proyectos, permisos de funciones, privilegios y políticas RLS del rol backend, concurrencia y revocación, rate limiting de login, pruebas de integración y CI.
+
+## Segunda revisión de rutas (2026-10-30)
+- Añadidos permisos `reports.read_all`, `reports.read_own`, `projects.read` en la migración SQL. Ejecutar el SQL actualizado desde cero en base de pruebas; si se ejecutó una versión anterior, aplicar los INSERT nuevos antes de desplegar.
+- Migradas rutas `api/pm/*` (panel, bonos, horas extra, personal), `api/gerencia`, `api/gerencia/proyectos` y `api/bonos-extras`.
+- Pendiente revisar específicamente operaciones de escritura de horas extra, perfiles, documentos, endpoints de debug, privilegios por proyecto y la totalidad de rutas.
+- IMPORTANTE: autorización por funciones SQL llamada desde Next.js no equivale todavía a políticas RLS por fila. Se requiere auditoría de todas las rutas y pruebas negativas antes de producción.
