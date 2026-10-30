@@ -104,48 +104,12 @@ async function getSupervisorTeam(username:string){
  }));
 }
 
-async function recalculateMonthly(employeeId: number, year: number, month: number) {
-  const rows = await prisma.horasExtraDia.findMany({
-    where: { employeeId, year, month },
-    select: {
-      total: true,
-      ordinarias: true,
-      feriados: true,
-      diurnas: true,
-      nocturnas: true,
-      diurnas_feriado: true,
-      nocturnas_feriado: true,
-    },
-  });
-
-  const totals = rows.reduce(
-    (acc, row) => ({
-      total: acc.total + Number(row.total),
-      ordinarias: acc.ordinarias + Number(row.ordinarias),
-      feriados: acc.feriados + Number(row.feriados),
-      diurnas: acc.diurnas + Number(row.diurnas),
-      nocturnas: acc.nocturnas + Number(row.nocturnas),
-      diurnas_feriado: acc.diurnas_feriado + Number(row.diurnas_feriado),
-      nocturnas_feriado: acc.nocturnas_feriado + Number(row.nocturnas_feriado),
-    }),
-    {
-      total: 0,
-      ordinarias: 0,
-      feriados: 0,
-      diurnas: 0,
-      nocturnas: 0,
-      diurnas_feriado: 0,
-      nocturnas_feriado: 0,
-    }
-  );
-
-  await prisma.horasExtraMes.upsert({
-    where: {
-      horas_extra_mes_unique: { employeeId, year, month },
-    },
-    update: totals,
-    create: { employeeId, year, month, ...totals },
-  });
+async function recalculateMonthly(client:import("pg").PoolClient,employeeId:number,year:number,month:number){
+ await client.query(
+ 'INSERT INTO public.horas_extra_mes("employeeId",year,month,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado) '+
+ 'SELECT $1,$2,$3,COALESCE(SUM(total),0),COALESCE(SUM(ordinarias),0),COALESCE(SUM(feriados),0),COALESCE(SUM(diurnas),0),COALESCE(SUM(nocturnas),0),COALESCE(SUM(diurnas_feriado),0),COALESCE(SUM(nocturnas_feriado),0) FROM public.horas_extra_dia WHERE "employeeId"=$1 AND year=$2 AND month=$3 '+
+ 'ON CONFLICT ("employeeId",year,month) DO UPDATE SET total=EXCLUDED.total,ordinarias=EXCLUDED.ordinarias,feriados=EXCLUDED.feriados,diurnas=EXCLUDED.diurnas,nocturnas=EXCLUDED.nocturnas,diurnas_feriado=EXCLUDED.diurnas_feriado,nocturnas_feriado=EXCLUDED.nocturnas_feriado,updated_at=CURRENT_TIMESTAMP',
+ [employeeId,year,month]);
 }
 
 async function buildResponse(username: string, year: number, month: number) {
