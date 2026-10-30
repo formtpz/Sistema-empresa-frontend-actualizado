@@ -271,43 +271,21 @@ export async function POST(req: Request) {
 }
 
 async function getEquipoHorasExtra(username: string, year?: number, month?: number) {
-  const employees = await prisma.employee.findMany({
-    select: {
-      id: true,
-      username: true,
-      puesto: true,
-      supervisor: true,
-      user: { select: { name: true } },
-    },
-  });
-
-  const equipo = employees.filter((employee) =>
-    supervisorMatches(username, employee.supervisor)
-  );
+  const employees=await query<{id:number;username:string;puesto:string|null;supervisor:string|null;name:string}>(
+    "SELECT e.id,e.username,e.puesto,e.supervisor,u.name FROM public.employees e JOIN public.users u ON u.username=e.username");
+  const equipo:TeamEmployee[]=employees.filter(e=>supervisorMatches(username,e.supervisor)).map(e=>({...e,user:{name:e.name}}));
 
   if (equipo.length === 0) return null;
 
   const employeeIds = equipo.map((employee) => employee.id);
-  const latest =
-    year && month
-      ? { year, month }
-      : await prisma.horasExtraMes.findFirst({
-          where: { employeeId: { in: employeeIds } },
-          orderBy: [{ year: "desc" }, { month: "desc" }],
-          select: { year: true, month: true },
-        });
-
-  if (!latest) {
-    return buildEquipoHorasExtra(equipo, null, null, []);
+  const [last]=year&&month?[{year,month}]:await query<{year:number;month:number}>(
+    'SELECT year,month FROM public.horas_extra_mes WHERE "employeeId"=ANY($1::int[]) ORDER BY year DESC,month DESC LIMIT 1',[employeeIds]);
+  const latest=last??null;
+  if(!latest)return buildEquipoHorasExtra(equipo,null,null,[]);
+  const rows=await query<HorasExtraRow>(
+    'SELECT "employeeId",total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado FROM public.horas_extra_mes WHERE "employeeId"=ANY($1::int[]) AND year=$2 AND month=$3',[employeeIds,latest.year,latest.month]);
+  return buildEquipoHorasExtra(equipo, null, null, []);
   }
-
-  const rows = await prisma.horasExtraMes.findMany({
-    where: {
-      employeeId: { in: employeeIds },
-      year: latest.year,
-      month: latest.month,
-    },
-  });
 
   return buildEquipoHorasExtra(equipo, latest.year, latest.month, rows);
 }
