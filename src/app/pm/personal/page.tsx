@@ -104,7 +104,7 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    void load(project);
+    void Promise.resolve().then(() => load(project));
   }, [load, project]);
 
   function selectProject(nextProject: ProjectCode) {
