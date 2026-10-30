@@ -4,11 +4,6 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { query } from "@/lib/db";
 
-type SessionUser = {
-  username: string;
-  role: string;
-};
-
 type HorasExtraInput = {
   employeeUsername?: unknown;
   year?: unknown;
