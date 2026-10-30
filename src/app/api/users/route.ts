@@ -1,41 +1,17 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { getSession } from "@/lib/session";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { ProjectCode, Role } from "@prisma/client";
+type Role = "ADMIN" | "RH" | "COORDINACION" | "OPERADOR" | "PM" | "GERENCIA";
+type ProjectCode = "COLOMBIA" | "PERU" | "ITALIA" | "GENERAL";
 
-function getSecrets() {
-  return [process.env.JWT_SECRET, process.env.AUTH_SECRET, "dev-secret"]
-    .filter(Boolean)
-    .map((secret) => new TextEncoder().encode(secret));
-}
-
-async function getSessionRole() {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  for (const secret of getSecrets()) {
-    try {
-      const { payload } = await jwtVerify(token, secret);
-      return String(payload.role ?? "").toUpperCase();
-    } catch {
-      // Keep compatibility with older local sessions signed with another secret.
-    }
-  }
-
-  return null;
-}
-
-function isRole(role: string): role is Role {
-  return Object.values(Role).includes(role as Role);
-}
-
-function isProjectCode(project: string): project is ProjectCode {
-  return Object.values(ProjectCode).includes(project as ProjectCode);
-}
+const ROLES: Role[]=["ADMIN","RH","COORDINACION","OPERADOR","PM","GERENCIA"];
+const PROJECT_CODES: ProjectCode[]=["COLOMBIA","PERU","ITALIA","GENERAL"];
+function isRole(role:string):role is Role{return ROLES.includes(role as Role);}
+function isProjectCode(code:string):code is ProjectCode{return PROJECT_CODES.includes(code as ProjectCode);}
+async function getSessionRole(){return (await getSession())?.role??null;}
 
 function parseDate(value: unknown) {
   const raw = String(value ?? "").trim();
@@ -81,7 +57,7 @@ export async function GET() {
       OR: [
         { puesto: { contains: "super", mode: "insensitive" } },
         { puesto: { contains: "coord", mode: "insensitive" } },
-        { user: { role: { in: [Role.COORDINACION, Role.PM] } } },
+        { user: { role: { in: ["COORDINACION", "PM"] } } },
       ],
     },
     orderBy: [{ user: { name: "asc" } }],
@@ -194,8 +170,8 @@ export async function POST(req: Request) {
     cedula ||
     puesto ||
     project ||
-    userRole === Role.OPERADOR ||
-    userRole === Role.COORDINACION;
+    userRole === "OPERADOR" ||
+    userRole === "COORDINACION";
 
   if (shouldHaveEmployee) {
     await prisma.employee.upsert({
