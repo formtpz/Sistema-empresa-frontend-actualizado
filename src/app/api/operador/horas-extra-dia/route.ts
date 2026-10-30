@@ -4,11 +4,6 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { query, getPool } from "@/lib/db";
 
-type SessionUser = {
-  username: string;
-  role: string;
-};
-
 type HorasDiaInput = {
   employeeUsername?: unknown;
   date?: unknown;
@@ -162,7 +157,7 @@ export async function GET(req: Request) {
     const year = Number(searchParams.get("year") ?? now.getFullYear());
     const month = Number(searchParams.get("month") ?? now.getMonth() + 1);
 
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    if (!Number.isInteger(year) || year < 2020 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
       return NextResponse.json({ message: "Periodo invalido." }, { status: 400 });
     }
 
@@ -172,8 +167,9 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json(await buildResponse(session.username, year, month));
-  } catch {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
+  } catch (error) {
+    console.error("Error consultando horas extra diarias", error);
+    return NextResponse.json({ message: "Error consultando horas extra" }, { status: 500 });
   }
 }
 
