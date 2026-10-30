@@ -1,10 +1,10 @@
 export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { requireRoleFromRequest } from "@/lib/auth";
+import { requirePermissionFromRequest } from "@/lib/auth";
 
 export async function GET(req: Request) {
-  const auth = await requireRoleFromRequest(req, ["PM", "GERENCIA", "ADMIN"]);
+  const auth = await requirePermissionFromRequest(req, "reports.read_all");
   if (!auth.ok) return NextResponse.json({ message: auth.message }, { status: auth.status });
   const code = (new URL(req.url).searchParams.get("project") || "GENERAL").toUpperCase();
   if (!["GENERAL", "COLOMBIA", "PERU", "ITALIA"].includes(code)) {
