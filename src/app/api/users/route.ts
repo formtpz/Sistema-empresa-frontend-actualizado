@@ -3,8 +3,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
-import { query } from "@/lib/db";
+import { getPool, query } from "@/lib/db";
 type Role = "ADMIN" | "RH" | "COORDINACION" | "OPERADOR" | "PM" | "GERENCIA";
 type ProjectCode = "COLOMBIA" | "PERU" | "ITALIA" | "GENERAL";
 
@@ -83,77 +82,37 @@ export async function POST(req: Request) {
   }
   const parsedProjectCode = projectCode && isProjectCode(projectCode) ? projectCode : null;
 
-  const existing = await prisma.user.findUnique({
-    where: { username },
-    select: { username: true, password: true },
-  });
-
-  if (!existing && !password) {
-    return NextResponse.json(
-      { message: "Password requerido para usuario nuevo." },
-      { status: 400 }
-    );
-  }
-
-  const hashedPassword = password ? await bcrypt.hash(password, 10) : existing!.password;
-
-  await prisma.user.upsert({
-    where: { username },
-    update: {
-      name,
-      email: email || null,
-      role: userRole,
-      active,
-      password: hashedPassword,
-    },
-    create: {
-      username,
-      name,
-      email: email || null,
-      role: userRole,
-      active,
-      password: hashedPassword,
-    },
-  });
-
-  const project = parsedProjectCode
-    ? await prisma.project.findUnique({ where: { code: parsedProjectCode } })
-    : null;
-
-  const employee = await prisma.employee.findUnique({ where: { username } });
-  const shouldHaveEmployee =
-    employee ||
-    supervisor ||
-    cedula ||
-    puesto ||
-    project ||
-    userRole === "OPERADOR" ||
-    userRole === "COORDINACION";
-
-  if (shouldHaveEmployee) {
-    await prisma.employee.upsert({
-      where: { username },
-      update: {
-        cedula: cedula || null,
-        email: email || null,
-        puesto,
-        supervisor,
-        vacaciones_saldo: Number.isFinite(vacacionesSaldo) ? vacacionesSaldo : 0,
-        start_date: startDate,
-        projectId: project?.id ?? null,
-      },
-      create: {
-        username,
-        cedula: cedula || null,
-        email: email || null,
-        supervisor,
-        puesto,
-        vacaciones_saldo: Number.isFinite(vacacionesSaldo) ? vacacionesSaldo : 0,
-        start_date: startDate,
-        projectId: project?.id ?? null,
-      },
-    });
-  }
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query<{password:string}>(
+      "SELECT password FROM public.users WHERE username=$1 FOR UPDATE",[username]);
+    if (!existing.rowCount && !password) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({message:"Password requerido para usuario nuevo."},{status:400});
+    }
+    const hashedPassword = password ? await bcrypt.hash(password,10) : existing.rows[0].password;
+    await client.query(
+      'INSERT INTO public.users(username,name,email,role,active,password) VALUES($1,$2,$3,$4::public."Role",$5,$6) ON CONFLICT(username) DO UPDATE SET name=EXCLUDED.name,email=EXCLUDED.email,role=EXCLUDED.role,active=EXCLUDED.active,password=EXCLUDED.password',
+      [username,name,email||null,userRole,active,hashedPassword]);
+    const project = parsedProjectCode
+      ? await client.query<{id:number}>('SELECT id FROM public.projects WHERE code=$1::public."ProjectCode"',[parsedProjectCode])
+      : null;
+    const projectId = project?.rows[0]?.id ?? null;
+    const employee = await client.query("SELECT id FROM public.employees WHERE username=$1",[username]);
+    const shouldHaveEmployee = Boolean(employee.rowCount || supervisor || cedula || puesto || projectId ||
+      userRole==="OPERADOR" || userRole==="COORDINACION");
+    if(shouldHaveEmployee) {
+      await client.query(
+        'INSERT INTO public.employees(username,cedula,email,puesto,supervisor,vacaciones_saldo,start_date,"projectId") VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(username) DO UPDATE SET cedula=EXCLUDED.cedula,email=EXCLUDED.email,puesto=EXCLUDED.puesto,supervisor=EXCLUDED.supervisor,vacaciones_saldo=EXCLUDED.vacaciones_saldo,start_date=EXCLUDED.start_date,"projectId"=EXCLUDED."projectId"',
+        [username,cedula||null,email||null,puesto,supervisor,Number.isFinite(vacacionesSaldo)?vacacionesSaldo:0,startDate,projectId]);
+    }
+    await client.query("COMMIT");
+  } catch(error) {
+    await client.query("ROLLBACK");
+    console.error("Error guardando usuario",error);
+    return NextResponse.json({message:"Error guardando usuario"},{status:500});
+  } finally { client.release(); }
 
   return NextResponse.json({ ok: true });
 }
