@@ -13,7 +13,7 @@ export async function GET(){
   const equipo=await query<TeamRow>(
    "SELECT e.username,u.name,u.email,u.role,u.active,e.puesto,e.supervisor,e.start_date,e.vacaciones_saldo "+
    "FROM public.employees e JOIN public.users u ON u.username=e.username "+
-   "WHERE (u.username=$2 OR public.app_can_access_request($2,e.username,'permissions.read_team')) "+
+   "WHERE (u.username=$2 OR public.app_can_view_employee($2,e.username)) "+
    "ORDER BY e.supervisor,e.username",[name,session.username]);
   return NextResponse.json({coordinador:{username:session.username,name},total:equipo.length,equipo:equipo.map(e=>({
    username:e.username,name:e.name||e.username,email:e.email??"",role:e.role,active:e.active,
