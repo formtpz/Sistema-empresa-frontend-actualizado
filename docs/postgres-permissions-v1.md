@@ -55,3 +55,11 @@
 - Migradas rutas `api/pm/*` (panel, bonos, horas extra, personal), `api/gerencia`, `api/gerencia/proyectos` y `api/bonos-extras`.
 - Pendiente revisar específicamente operaciones de escritura de horas extra, perfiles, documentos, endpoints de debug, privilegios por proyecto y la totalidad de rutas.
 - IMPORTANTE: autorización por funciones SQL llamada desde Next.js no equivale todavía a políticas RLS por fila. Se requiere auditoría de todas las rutas y pruebas negativas antes de producción.
+
+## Auditoría de alcance de datos (continuación)
+- Corregido `api/coordinador/equipo`: antes entregaba todos los empleados; ahora filtra con `app_can_access_request`.
+- Corregido `api/perfil/[username]`: ya no basta un rol privilegiado para consultar cualquier perfil; requiere alcance de equipo o ser titular.
+- Corregido `api/rrhh/documento-vacaciones`: la descarga PDF exige permiso actual y alcance de solicitud.
+- `api/debut/db` requiere ahora `users.manage`; `api/debug-env` responde 404.
+- PENDIENTE CRÍTICO: rutas `api/operador` y `api/operador/horas-extra-dia` escriben horas de empleados con comprobación de supervisor mediante coincidencias parciales de texto. Sustituir por autorización de equipo estricta y permiso específico antes del merge.
+- PENDIENTE: verificar build, pruebas negativas de acceso y las reglas RLS; no desplegar todavía.
