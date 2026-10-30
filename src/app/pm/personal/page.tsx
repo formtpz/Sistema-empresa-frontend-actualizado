@@ -100,11 +100,11 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    setProject(normalizeProject(new URLSearchParams(window.location.search).get("project")));
+    void Promise.resolve().then(() => setProject(normalizeProject(new URLSearchParams(window.location.search).get("project"))));
   }, []);
 
   useEffect(() => {
-    void load(project);
+    void Promise.resolve().then(() => load(project));
   }, [load, project]);
 
   function selectProject(nextProject: ProjectCode) {

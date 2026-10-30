@@ -2,14 +2,8 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
-
-function getSecret() {
-  const secret = process.env.JWT_SECRET || "dev-secret";
-  return new TextEncoder().encode(secret);
-}
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
 
 function toNumber(d: unknown) {
   // Prisma Decimal -> number (puede venir como Decimal/string)
@@ -33,51 +27,15 @@ function displayName(name: string, username: string) {
 
 export async function GET(req: Request) {
   try {
-    // 1) Cookie session (Next moderno: cookies() es async)
-    const cookieStore = await cookies();
-    const token = cookieStore.get("session")?.value;
-
-    if (!token) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
-    }
-
-    // 2) username desde JWT sub (igual que /api/me)
-    const { payload } = await jwtVerify(token, getSecret());
-    const username = String(payload.sub ?? "").trim();
-
-    if (!username) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
-    }
-
-    // 3) User activo
-    const user = await prisma.user.findUnique({
-      where: { username },
-      select: { username: true, name: true, role: true, active: true },
-    });
-
-    if (!user || !user.active) {
-      return NextResponse.json({ authenticated: false }, { status: 401 });
-    }
-
-    // 4) Employee por username (es @unique en tu schema)
-    const employee = await prisma.employee.findUnique({
-      where: { username },
-      select: {
-        id: true,
-        username: true,
-        puesto: true,
-        supervisor: true,
-        vacaciones_saldo: true,
-        start_date: true,
-      },
-    });
-
-    if (!employee) {
-      return NextResponse.json(
-        { message: "Employee no encontrado para username", username },
-        { status: 404 }
-      );
-    }
+    const session=await getSession();
+    if(!session)return NextResponse.json({authenticated:false},{status:401});
+    const username=session.username;
+    const [user]=await query<{username:string;name:string;role:string;active:boolean}>(
+      "SELECT username,name,role,active FROM public.users WHERE username=$1",[username]);
+    if(!user)return NextResponse.json({authenticated:false},{status:401});
+    const [employee]=await query<{id:number;username:string;puesto:string|null;supervisor:string|null;vacaciones_saldo:string;start_date:Date|null}>(
+      "SELECT id,username,puesto,supervisor,vacaciones_saldo,start_date FROM public.employees WHERE username=$1",[username]);
+    if(!employee)return NextResponse.json({message:"Employee no encontrado para username",username},{status:404});
 
     // 5) Periodo solicitado (default: mes actual)
     const url = new URL(req.url);
@@ -85,41 +43,14 @@ export async function GET(req: Request) {
     const requestedMonth = Number(url.searchParams.get("month") ?? now.getMonth() + 1);
     const requestedYear = Number(url.searchParams.get("year") ?? now.getFullYear());
 
-    // 6) Buscar registros EXACTOS del mes solicitado (por @@unique compuesto)
-    const bonosRequested = await prisma.bonosMes.findUnique({
-      where: {
-        bonos_mes_unique: {
-          employeeId: employee.id,
-          year: requestedYear,
-          month: requestedMonth,
-        },
-      },
-    });
-
-    const extrasRequested = await prisma.horasExtraMes.findUnique({
-      where: {
-        horas_extra_mes_unique: {
-          employeeId: employee.id,
-          year: requestedYear,
-          month: requestedMonth,
-        },
-      },
-    });
-
-    // 7) Fallback: si el mes solicitado no tiene data, traer el último disponible
-    const bonosFallback = !bonosRequested
-      ? await prisma.bonosMes.findFirst({
-          where: { employeeId: employee.id },
-          orderBy: [{ year: "desc" }, { month: "desc" }],
-        })
-      : null;
-
-    const extrasFallback = !extrasRequested
-      ? await prisma.horasExtraMes.findFirst({
-          where: { employeeId: employee.id },
-          orderBy: [{ year: "desc" }, { month: "desc" }],
-        })
-      : null;
+    if(!Number.isInteger(requestedYear)||requestedYear<2020||requestedYear>2100||!Number.isInteger(requestedMonth)||requestedMonth<1||requestedMonth>12)
+      return NextResponse.json({message:"Periodo invalido"},{status:400});
+    type Bonus={year:number;month:number;total:string;productividad:string;calidad:string;qc:string;validacion:string;supervision:string;calidad_sup:string;supervision_sig:string;calidad_sig:string;bono_fijo:string};
+    type Extra={year:number;month:number;total:string;ordinarias:string;feriados:string;diurnas:string;nocturnas:string;diurnas_feriado:string;nocturnas_feriado:string};
+    const [bonosRequested]=await query<Bonus>('SELECT * FROM public.bonos_mes WHERE "employeeId"=$1 AND year=$2 AND month=$3',[employee.id,requestedYear,requestedMonth]);
+    const [extrasRequested]=await query<Extra>('SELECT * FROM public.horas_extra_mes WHERE "employeeId"=$1 AND year=$2 AND month=$3',[employee.id,requestedYear,requestedMonth]);
+    const [bonosFallback]=bonosRequested?[]:await query<Bonus>('SELECT * FROM public.bonos_mes WHERE "employeeId"=$1 ORDER BY year DESC,month DESC LIMIT 1',[employee.id]);
+    const [extrasFallback]=extrasRequested?[]:await query<Extra>('SELECT * FROM public.horas_extra_mes WHERE "employeeId"=$1 ORDER BY year DESC,month DESC LIMIT 1',[employee.id]);
 
     const bonos = bonosRequested ?? bonosFallback;
     const extras = extrasRequested ?? extrasFallback;

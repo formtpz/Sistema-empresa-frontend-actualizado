@@ -1,14 +1,8 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
-
-type SessionUser = {
-  username: string;
-  role: string;
-};
+import { getSession } from "@/lib/session";
+import { query, getPool } from "@/lib/db";
 
 type HorasDiaInput = {
   employeeUsername?: unknown;
@@ -23,22 +17,7 @@ type HorasDiaInput = {
   justificacion?: unknown;
 };
 
-function getSecret() {
-  const secret = process.env.JWT_SECRET || "dev-secret";
-  return new TextEncoder().encode(secret);
-}
-
-async function getSessionUser(): Promise<SessionUser | null> {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  const { payload } = await jwtVerify(token, getSecret());
-  const username = String(payload.sub ?? payload.username ?? "").trim();
-  const role = String(payload.role ?? "").toUpperCase();
-
-  if (!username) return null;
-  return { username, role };
-}
+const getSessionUser = getSession;
 
 function normalizeText(value: string) {
   return value
@@ -111,76 +90,29 @@ function parsePayload(body: HorasDiaInput) {
   };
 }
 
-async function getSupervisorTeam(username: string) {
-  const employees = await prisma.employee.findMany({
-    select: {
-      id: true,
-      username: true,
-      puesto: true,
-      supervisor: true,
-      user: { select: { name: true } },
-    },
-  });
-
-  return employees.filter((employee) => supervisorMatches(username, employee.supervisor));
+async function getSupervisorTeam(username:string){
+ const employees=await query<{id:number;username:string;puesto:string|null;supervisor:string|null;name:string}>(
+ "SELECT e.id,e.username,e.puesto,e.supervisor,u.name FROM public.employees e JOIN public.users u ON u.username=e.username");
+ return employees.filter(e=>supervisorMatches(username,e.supervisor)).map(e=>({
+ id:e.id,username:e.username,puesto:e.puesto,supervisor:e.supervisor,user:{name:e.name}
+ }));
 }
 
-async function recalculateMonthly(employeeId: number, year: number, month: number) {
-  const rows = await prisma.horasExtraDia.findMany({
-    where: { employeeId, year, month },
-    select: {
-      total: true,
-      ordinarias: true,
-      feriados: true,
-      diurnas: true,
-      nocturnas: true,
-      diurnas_feriado: true,
-      nocturnas_feriado: true,
-    },
-  });
-
-  const totals = rows.reduce(
-    (acc, row) => ({
-      total: acc.total + Number(row.total),
-      ordinarias: acc.ordinarias + Number(row.ordinarias),
-      feriados: acc.feriados + Number(row.feriados),
-      diurnas: acc.diurnas + Number(row.diurnas),
-      nocturnas: acc.nocturnas + Number(row.nocturnas),
-      diurnas_feriado: acc.diurnas_feriado + Number(row.diurnas_feriado),
-      nocturnas_feriado: acc.nocturnas_feriado + Number(row.nocturnas_feriado),
-    }),
-    {
-      total: 0,
-      ordinarias: 0,
-      feriados: 0,
-      diurnas: 0,
-      nocturnas: 0,
-      diurnas_feriado: 0,
-      nocturnas_feriado: 0,
-    }
-  );
-
-  await prisma.horasExtraMes.upsert({
-    where: {
-      horas_extra_mes_unique: { employeeId, year, month },
-    },
-    update: totals,
-    create: { employeeId, year, month, ...totals },
-  });
+async function recalculateMonthly(client:import("pg").PoolClient,employeeId:number,year:number,month:number){
+ await client.query(
+ 'INSERT INTO public.horas_extra_mes("employeeId",year,month,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado) '+
+ 'SELECT $1,$2,$3,COALESCE(SUM(total),0),COALESCE(SUM(ordinarias),0),COALESCE(SUM(feriados),0),COALESCE(SUM(diurnas),0),COALESCE(SUM(nocturnas),0),COALESCE(SUM(diurnas_feriado),0),COALESCE(SUM(nocturnas_feriado),0) FROM public.horas_extra_dia WHERE "employeeId"=$1 AND year=$2 AND month=$3 '+
+ 'ON CONFLICT ("employeeId",year,month) DO UPDATE SET total=EXCLUDED.total,ordinarias=EXCLUDED.ordinarias,feriados=EXCLUDED.feriados,diurnas=EXCLUDED.diurnas,nocturnas=EXCLUDED.nocturnas,diurnas_feriado=EXCLUDED.diurnas_feriado,nocturnas_feriado=EXCLUDED.nocturnas_feriado,updated_at=CURRENT_TIMESTAMP',
+ [employeeId,year,month]);
 }
 
 async function buildResponse(username: string, year: number, month: number) {
   const team = await getSupervisorTeam(username);
   const employeeIds = team.map((employee) => employee.id);
 
-  const rows =
-    employeeIds.length > 0
-      ? await prisma.horasExtraDia.findMany({
-          where: { employeeId: { in: employeeIds }, year, month },
-          include: { employee: { include: { user: true } } },
-          orderBy: [{ date: "desc" }, { employee: { username: "asc" } }],
-        })
-      : [];
+  const rows = employeeIds.length>0 ? await query<{
+ id:string;username:string;name:string;puesto:string|null;date:Date;total:string;ordinarias:string;feriados:string;diurnas:string;nocturnas:string;diurnas_feriado:string;nocturnas_feriado:string;justificacion:string|null
+ }>('SELECT h.id,e.username,u.name,e.puesto,h.date,h.total,h.ordinarias,h.feriados,h.diurnas,h.nocturnas,h.diurnas_feriado,h.nocturnas_feriado,h.justificacion FROM public.horas_extra_dia h JOIN public.employees e ON e.id=h."employeeId" JOIN public.users u ON u.username=e.username WHERE h."employeeId"=ANY($1::int[]) AND h.year=$2 AND h.month=$3 ORDER BY h.date DESC,e.username',[employeeIds,year,month]) : [];
 
   return {
     ok: true,
@@ -193,9 +125,9 @@ async function buildResponse(username: string, year: number, month: number) {
     })),
     items: rows.map((row) => ({
       id: row.id,
-      username: row.employee.username,
-      name: row.employee.user.name,
-      puesto: row.employee.puesto ?? "",
+      username: row.username,
+      name: row.name,
+      puesto: row.puesto ?? "",
       date: row.date.toISOString().slice(0, 10),
       total: Number(row.total),
       ordinarias: Number(row.ordinarias),
@@ -225,7 +157,7 @@ export async function GET(req: Request) {
     const year = Number(searchParams.get("year") ?? now.getFullYear());
     const month = Number(searchParams.get("month") ?? now.getMonth() + 1);
 
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    if (!Number.isInteger(year) || year < 2020 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
       return NextResponse.json({ message: "Periodo invalido." }, { status: 400 });
     }
 
@@ -235,8 +167,9 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json(await buildResponse(session.username, year, month));
-  } catch {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
+  } catch (error) {
+    console.error("Error consultando horas extra diarias", error);
+    return NextResponse.json({ message: "Error consultando horas extra" }, { status: 500 });
   }
 }
 
@@ -256,10 +189,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: "Datos invalidos." }, { status: 400 });
     }
 
-    const employee = await prisma.employee.findUnique({
-      where: { username: parsed.employeeUsername },
-      select: { id: true, supervisor: true },
-    });
+    const [employee] = await query<{id:number;supervisor:string|null}>(
+      "SELECT id,supervisor FROM public.employees WHERE username=$1",[parsed.employeeUsername]);
 
     if (!employee || !supervisorMatches(session.username, employee.supervisor)) {
       return NextResponse.json(
@@ -268,44 +199,16 @@ export async function POST(req: Request) {
       );
     }
 
-    await prisma.horasExtraDia.upsert({
-      where: {
-        horas_extra_dia_unique: {
-          employeeId: employee.id,
-          date: parsed.date,
-        },
-      },
-      update: {
-        year: parsed.year,
-        month: parsed.month,
-        day: parsed.day,
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-        justificacion: parsed.justificacion,
-      },
-      create: {
-        employeeId: employee.id,
-        date: parsed.date,
-        year: parsed.year,
-        month: parsed.month,
-        day: parsed.day,
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-        justificacion: parsed.justificacion,
-      },
-    });
-
-    await recalculateMonthly(employee.id, parsed.year, parsed.month);
+    const client=await getPool().connect();
+    try{
+      await client.query("BEGIN");
+      await client.query(
+        'INSERT INTO public.horas_extra_dia("employeeId",date,year,month,day,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado,justificacion) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT ("employeeId",date) DO UPDATE SET year=EXCLUDED.year,month=EXCLUDED.month,day=EXCLUDED.day,total=EXCLUDED.total,ordinarias=EXCLUDED.ordinarias,feriados=EXCLUDED.feriados,diurnas=EXCLUDED.diurnas,nocturnas=EXCLUDED.nocturnas,diurnas_feriado=EXCLUDED.diurnas_feriado,nocturnas_feriado=EXCLUDED.nocturnas_feriado,justificacion=EXCLUDED.justificacion,updated_at=CURRENT_TIMESTAMP',
+        [employee.id,parsed.date,parsed.year,parsed.month,parsed.day,parsed.total,parsed.ordinarias,parsed.feriados,parsed.diurnas,parsed.nocturnas,parsed.diurnas_feriado,parsed.nocturnas_feriado,parsed.justificacion]);
+      await recalculateMonthly(client,employee.id,parsed.year,parsed.month);
+      await client.query("COMMIT");
+    }catch(error){await client.query("ROLLBACK");throw error;}
+    finally{client.release();}
 
     return NextResponse.json({
       ...(await buildResponse(session.username, parsed.year, parsed.month)),

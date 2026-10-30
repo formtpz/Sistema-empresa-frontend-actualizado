@@ -1,14 +1,8 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
-
-type SessionUser = {
-  username: string;
-  role: string;
-};
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
 
 type HorasExtraInput = {
   employeeUsername?: unknown;
@@ -42,22 +36,7 @@ type HorasExtraRow = {
   nocturnas_feriado: unknown;
 };
 
-function getSecret() {
-  const secret = process.env.JWT_SECRET || "dev-secret";
-  return new TextEncoder().encode(secret);
-}
-
-async function getSessionUser(): Promise<SessionUser | null> {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  const { payload } = await jwtVerify(token, getSecret());
-  const username = String(payload.sub ?? payload.username ?? "").trim();
-  const role = String(payload.role ?? "").toUpperCase();
-
-  if (!username) return null;
-  return { username, role };
-}
+const getSessionUser = getSession;
 
 function monthsDiff(from: Date, to: Date) {
   let months =
@@ -188,21 +167,10 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado" }, { status: 403 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { username: session.username },
-      select: { username: true, name: true, email: true, role: true },
-    });
-
-    const emp = await prisma.employee.findUnique({
-      where: { username: session.username },
-      select: {
-        cedula: true,
-        puesto: true,
-        supervisor: true,
-        start_date: true,
-        vacaciones_saldo: true,
-      },
-    });
+    const [user]=await query<{username:string;name:string;email:string|null;role:string}>(
+      "SELECT username,name,email,role FROM public.users WHERE username=$1",[session.username]);
+    const [emp]=await query<{cedula:string|null;puesto:string|null;supervisor:string|null;start_date:Date|null;vacaciones_saldo:string}>(
+      "SELECT cedula,puesto,supervisor,start_date,vacaciones_saldo FROM public.employees WHERE username=$1",[session.username]);
 
     if (!user) {
       return NextResponse.json({ message: "Usuario no existe" }, { status: 404 });
@@ -233,8 +201,9 @@ export async function GET() {
       vacaciones_actual: vacacionesActual,
       equipo_horas_extra: await getEquipoHorasExtra(session.username),
     });
-  } catch {
-    return NextResponse.json({ message: "No autenticado" }, { status: 401 });
+  } catch (error) {
+    console.error("Error consultando operador",error);
+    return NextResponse.json({ message: "Error consultando perfil" }, { status: 500 });
   }
 }
 
@@ -257,15 +226,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const employee = await prisma.employee.findUnique({
-      where: { username: parsed.employeeUsername },
-      select: {
-        id: true,
-        username: true,
-        supervisor: true,
-        user: { select: { name: true } },
-      },
-    });
+    const [employee]=await query<{id:number;username:string;supervisor:string|null;name:string}>(
+      "SELECT e.id,e.username,e.supervisor,u.name FROM public.employees e JOIN public.users u ON u.username=e.username WHERE e.username=$1",[parsed.employeeUsername]);
 
     if (!employee || !supervisorMatches(session.username, employee.supervisor)) {
       return NextResponse.json(
@@ -274,43 +236,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const saved = await prisma.horasExtraMes.upsert({
-      where: {
-        horas_extra_mes_unique: {
-          employeeId: employee.id,
-          year: parsed.year,
-          month: parsed.month,
-        },
-      },
-      update: {
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-      },
-      create: {
-        employeeId: employee.id,
-        year: parsed.year,
-        month: parsed.month,
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-      },
-    });
+    const [saved]=await query<{year:number;month:number;total:string;ordinarias:string;feriados:string;diurnas:string;nocturnas:string;diurnas_feriado:string;nocturnas_feriado:string}>(
+      'INSERT INTO public.horas_extra_mes("employeeId",year,month,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT ("employeeId",year,month) DO UPDATE SET total=EXCLUDED.total,ordinarias=EXCLUDED.ordinarias,feriados=EXCLUDED.feriados,diurnas=EXCLUDED.diurnas,nocturnas=EXCLUDED.nocturnas,diurnas_feriado=EXCLUDED.diurnas_feriado,nocturnas_feriado=EXCLUDED.nocturnas_feriado,updated_at=CURRENT_TIMESTAMP RETURNING year,month,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado',
+      [employee.id,parsed.year,parsed.month,parsed.total,parsed.ordinarias,parsed.feriados,parsed.diurnas,parsed.nocturnas,parsed.diurnas_feriado,parsed.nocturnas_feriado]);
 
     return NextResponse.json({
       ok: true,
       message: "Horas extra guardadas.",
       item: {
         username: employee.username,
-        name: employee.user.name,
+        name: employee.name,
         year: saved.year,
         month: saved.month,
         total: Number(saved.total),
@@ -332,44 +267,19 @@ export async function POST(req: Request) {
 }
 
 async function getEquipoHorasExtra(username: string, year?: number, month?: number) {
-  const employees = await prisma.employee.findMany({
-    select: {
-      id: true,
-      username: true,
-      puesto: true,
-      supervisor: true,
-      user: { select: { name: true } },
-    },
-  });
-
-  const equipo = employees.filter((employee) =>
-    supervisorMatches(username, employee.supervisor)
-  );
+  const employees=await query<{id:number;username:string;puesto:string|null;supervisor:string|null;name:string}>(
+    "SELECT e.id,e.username,e.puesto,e.supervisor,u.name FROM public.employees e JOIN public.users u ON u.username=e.username");
+  const equipo:TeamEmployee[]=employees.filter(e=>supervisorMatches(username,e.supervisor)).map(e=>({...e,user:{name:e.name}}));
 
   if (equipo.length === 0) return null;
 
   const employeeIds = equipo.map((employee) => employee.id);
-  const latest =
-    year && month
-      ? { year, month }
-      : await prisma.horasExtraMes.findFirst({
-          where: { employeeId: { in: employeeIds } },
-          orderBy: [{ year: "desc" }, { month: "desc" }],
-          select: { year: true, month: true },
-        });
-
-  if (!latest) {
-    return buildEquipoHorasExtra(equipo, null, null, []);
-  }
-
-  const rows = await prisma.horasExtraMes.findMany({
-    where: {
-      employeeId: { in: employeeIds },
-      year: latest.year,
-      month: latest.month,
-    },
-  });
-
+  const [last]=year&&month?[{year,month}]:await query<{year:number;month:number}>(
+    'SELECT year,month FROM public.horas_extra_mes WHERE "employeeId"=ANY($1::int[]) ORDER BY year DESC,month DESC LIMIT 1',[employeeIds]);
+  const latest=last??null;
+  if(!latest)return buildEquipoHorasExtra(equipo,null,null,[]);
+  const rows=await query<HorasExtraRow>(
+    'SELECT "employeeId" AS "employeeId",total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado FROM public.horas_extra_mes WHERE "employeeId"=ANY($1::int[]) AND year=$2 AND month=$3',[employeeIds,latest.year,latest.month]);
   return buildEquipoHorasExtra(equipo, latest.year, latest.month, rows);
 }
 
