@@ -11,26 +11,16 @@ jobs:
   check:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Instalar dependencias y actualizar lockfile en CI
+      - name: Instalar dependencias
         run: |
-          npm install --include=optional --no-audit --no-fund
+          npm ci --include=optional --no-audit --no-fund
           npm install --no-save --no-package-lock --include=optional "lightningcss-linux-x64-gnu@$(node -p 'require("lightningcss/package.json").version')"
-      - name: Guardar lockfile regenerado
-        if: github.event_name == 'push' && github.ref == 'refs/heads/refactor/postgres-etapa4'
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package-lock.json
-          if ! git diff --cached --quiet; then
-            git commit -m 'Sync package-lock.json after Prisma removal'
-            git push origin HEAD:refactor/postgres-etapa4
-          fi
       - name: Validar TypeScript
         run: npx tsc --noEmit
       - name: Validar ESLint
