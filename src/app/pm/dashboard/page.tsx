@@ -146,7 +146,7 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    void loadDashboard(project);
+    void Promise.resolve().then(() => loadDashboard(project));
   }, [loadDashboard, project]);
 
   const headcount = dash?.personal ?? 0;
