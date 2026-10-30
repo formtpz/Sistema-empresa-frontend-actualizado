@@ -11,7 +11,7 @@ const ROLES: Role[]=["ADMIN","RH","COORDINACION","OPERADOR","PM","GERENCIA"];
 const PROJECT_CODES: ProjectCode[]=["COLOMBIA","PERU","ITALIA","GENERAL"];
 function isRole(role:string):role is Role{return ROLES.includes(role as Role);}
 function isProjectCode(code:string):code is ProjectCode{return PROJECT_CODES.includes(code as ProjectCode);}
-async function getSessionRole(){return (await getSession())?.role??null;}
+async function getSessionRole(){const session=await getSession();if(!session)return null;const [r]=await query<{allowed:boolean}>("SELECT public.app_has_permission($1,$2) AS allowed",[session.username,"users.manage"]);return r?.allowed?"ADMIN":null;}
 
 function parseDate(value: unknown) {
   const raw = String(value ?? "").trim();
