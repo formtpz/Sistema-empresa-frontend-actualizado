@@ -116,14 +116,9 @@ async function buildResponse(username: string, year: number, month: number) {
   const team = await getSupervisorTeam(username);
   const employeeIds = team.map((employee) => employee.id);
 
-  const rows =
-    employeeIds.length > 0
-      ? await prisma.horasExtraDia.findMany({
-          where: { employeeId: { in: employeeIds }, year, month },
-          include: { employee: { include: { user: true } } },
-          orderBy: [{ date: "desc" }, { employee: { username: "asc" } }],
-        })
-      : [];
+  const rows = employeeIds.length>0 ? await query<{
+ id:string;username:string;name:string;puesto:string|null;date:Date;total:string;ordinarias:string;feriados:string;diurnas:string;nocturnas:string;diurnas_feriado:string;nocturnas_feriado:string;justificacion:string|null
+ }>('SELECT h.id,e.username,u.name,e.puesto,h.date,h.total,h.ordinarias,h.feriados,h.diurnas,h.nocturnas,h.diurnas_feriado,h.nocturnas_feriado,h.justificacion FROM public.horas_extra_dia h JOIN public.employees e ON e.id=h."employeeId" JOIN public.users u ON u.username=e.username WHERE h."employeeId"=ANY($1::int[]) AND h.year=$2 AND h.month=$3 ORDER BY h.date DESC,e.username',[employeeIds,year,month]) : [];
 
   return {
     ok: true,
@@ -136,9 +131,9 @@ async function buildResponse(username: string, year: number, month: number) {
     })),
     items: rows.map((row) => ({
       id: row.id,
-      username: row.employee.username,
-      name: row.employee.user.name,
-      puesto: row.employee.puesto ?? "",
+      username: row.username,
+      name: row.name,
+      puesto: row.puesto ?? "",
       date: row.date.toISOString().slice(0, 10),
       total: Number(row.total),
       ordinarias: Number(row.ordinarias),
