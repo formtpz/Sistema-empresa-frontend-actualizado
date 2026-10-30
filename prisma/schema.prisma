@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  RH
+  COORDINACION
+  OPERADOR
+  PM
+  GERENCIA
+}
+
+enum PermisoTipo {
+  VACACIONES
+  PERSONAL
+  MEDICO
+  TRAMITE
+  OTRO
+}
+
+enum PermisoEstado {
+  ENVIADO
+  APROBADO
+  RECHAZADO
+}
+
+enum ProjectCode {
+  COLOMBIA
+  PERU
+  ITALIA
+  GENERAL
+}
+
+model Project {
+  id         Int         @id @default(autoincrement())
+  code       ProjectCode @unique
+  name       String
+  active     Boolean     @default(true)
+  created_at DateTime    @default(now())
+
+  // relaciones
+  employees  Employee[]
+  permisos   Permiso[]
+
+  @@map("projects")
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  username   String   @unique
+  name       String
+  email      String?
+  role       Role
+  active     Boolean  @default(true)
+  password   String
+  created_at DateTime @default(now())
+
+  // relaciones
+  employee   Employee?
+  permisos   Permiso[]
+
+  @@map("users")
+}
+
+model Employee {
+  id         Int       @id @default(autoincrement())
+  username   String    @unique
+  cedula     String?   @unique
+  email      String?
+  puesto     String?
+  supervisor String?
+  start_date DateTime?
+
+  // saldo que viene del Excel
+  vacaciones_saldo Decimal @default(0)
+
+  created_at DateTime @default(now())
+
+  // Proyecto asignado (un empleado = un proyecto, por ahora)
+  projectId Int?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  // relación con User (por username)
+  user      User     @relation(fields: [username], references: [username], onDelete: Cascade)
+
+  // ✅ nuevas relaciones mensuales
+  horasExtraMes HorasExtraMes[]
+  horasExtraDia HorasExtraDia[]
+  bonosMes      BonosMes[]
+
+  @@index([projectId])
+  @@map("employees")
+}
+
+model Permiso {
+  id           String        @id @default(uuid())
+  username     String
+  tipo         PermisoTipo
+  fecha_inicio DateTime
+  fecha_fin    DateTime
+  motivo       String
+  estado       PermisoEstado @default(ENVIADO)
+  created_at   DateTime      @default(now())
+
+  // proyecto del permiso
+  projectId Int?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  // relación con User
+  user       User     @relation(fields: [username], references: [username], onDelete: Cascade)
+
+  @@index([username])
+  @@index([projectId])
+  @@map("permisos")
+}
+
+model HorasExtraMes {
+  id         String   @id @default(uuid())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  year  Int
+  month Int // 1-12
+
+  total                 Decimal @default(0)
+  ordinarias            Decimal @default(0)
+  feriados              Decimal @default(0)
+  diurnas               Decimal @default(0)
+  nocturnas             Decimal @default(0)
+  diurnas_feriado       Decimal @default(0)
+  nocturnas_feriado     Decimal @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([employeeId, year, month], name: "horas_extra_mes_unique")
+  @@index([year, month])
+  @@map("horas_extra_mes")
+}
+
+model HorasExtraDia {
+  id         String   @id @default(uuid())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  date  DateTime
+  year  Int
+  month Int
+  day   Int
+
+  total                 Decimal @default(0)
+  ordinarias            Decimal @default(0)
+  feriados              Decimal @default(0)
+  diurnas               Decimal @default(0)
+  nocturnas             Decimal @default(0)
+  diurnas_feriado       Decimal @default(0)
+  nocturnas_feriado     Decimal @default(0)
+  justificacion         String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([employeeId, date], name: "horas_extra_dia_unique")
+  @@index([year, month])
+  @@map("horas_extra_dia")
+}
+
+model BonosMes {
+  id         String   @id @default(uuid())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  year  Int
+  month Int // 1-12
+
+  // Total del mes (excel o calculado)
+  total Decimal @default(0)
+
+  // ✅ columnas del excel
+  productividad Decimal @default(0) // "Monto Por Productividad"
+  calidad       Decimal @default(0) // "Monto Por Calidad"
+  qc            Decimal @default(0) // "Monto QC"
+  validacion    Decimal @default(0) // "Monto Validación"
+
+  supervision     Decimal @default(0) // "Supervisión"
+  calidad_sup     Decimal @default(0) // "Calidad /Entregas Supervisor"
+  supervision_sig Decimal @default(0) // "Supervisión SIG"
+  calidad_sig     Decimal @default(0) // "Calidad /Entregas SIG"
+  bono_fijo       Decimal @default(0) // "Bono Fijo"
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([employeeId, year, month], name: "bonos_mes_unique")
+  @@index([year, month])
+  @@map("bonos_mes")
+}
