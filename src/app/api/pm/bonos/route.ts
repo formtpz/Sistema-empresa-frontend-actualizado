@@ -1,12 +1,12 @@
 export const runtime="nodejs";
 import { NextResponse } from "next/server";
-import { requireRoleFromRequest } from "@/lib/auth";
+import { requirePermissionFromRequest } from "@/lib/auth";
 import { query } from "@/lib/db";
 
 type BonusRow = { id:string; employeeId:number; username:string; name:string; project:string|null; year:number; month:number; total:string; productividad:string; calidad:string; qc:string; validacion:string; supervision:string; calidad_sup:string; supervision_sig:string; calidad_sig:string; bono_fijo:string };
 const fields=["total","productividad","calidad","qc","validacion","supervision","calidad_sup","supervision_sig","calidad_sig","bono_fijo"] as const;
 export async function GET(req:Request) {
-  const auth=await requireRoleFromRequest(req,["PM","GERENCIA","ADMIN"]);
+  const auth=await requirePermissionFromRequest(req, "reports.read_all");
   if(!auth.ok) return NextResponse.json({ok:false,error:auth.message},{status:auth.status});
   const sp=new URL(req.url).searchParams;
   const project=(sp.get("project")??"GENERAL").toUpperCase();
