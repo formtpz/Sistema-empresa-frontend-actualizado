@@ -230,15 +230,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const employee = await prisma.employee.findUnique({
-      where: { username: parsed.employeeUsername },
-      select: {
-        id: true,
-        username: true,
-        supervisor: true,
-        user: { select: { name: true } },
-      },
-    });
+    const [employee]=await query<{id:number;username:string;supervisor:string|null;name:string}>(
+      "SELECT e.id,e.username,e.supervisor,u.name FROM public.employees e JOIN public.users u ON u.username=e.username WHERE e.username=$1",[parsed.employeeUsername]);
 
     if (!employee || !supervisorMatches(session.username, employee.supervisor)) {
       return NextResponse.json(
@@ -247,43 +240,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const saved = await prisma.horasExtraMes.upsert({
-      where: {
-        horas_extra_mes_unique: {
-          employeeId: employee.id,
-          year: parsed.year,
-          month: parsed.month,
-        },
-      },
-      update: {
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-      },
-      create: {
-        employeeId: employee.id,
-        year: parsed.year,
-        month: parsed.month,
-        total: parsed.total,
-        ordinarias: parsed.ordinarias,
-        feriados: parsed.feriados,
-        diurnas: parsed.diurnas,
-        nocturnas: parsed.nocturnas,
-        diurnas_feriado: parsed.diurnas_feriado,
-        nocturnas_feriado: parsed.nocturnas_feriado,
-      },
-    });
+    const [saved]=await query<{year:number;month:number;total:string;ordinarias:string;feriados:string;diurnas:string;nocturnas:string;diurnas_feriado:string;nocturnas_feriado:string}>(
+      'INSERT INTO public.horas_extra_mes("employeeId",year,month,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT ("employeeId",year,month) DO UPDATE SET total=EXCLUDED.total,ordinarias=EXCLUDED.ordinarias,feriados=EXCLUDED.feriados,diurnas=EXCLUDED.diurnas,nocturnas=EXCLUDED.nocturnas,diurnas_feriado=EXCLUDED.diurnas_feriado,nocturnas_feriado=EXCLUDED.nocturnas_feriado,updated_at=CURRENT_TIMESTAMP RETURNING year,month,total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado',
+      [employee.id,parsed.year,parsed.month,parsed.total,parsed.ordinarias,parsed.feriados,parsed.diurnas,parsed.nocturnas,parsed.diurnas_feriado,parsed.nocturnas_feriado]);
 
     return NextResponse.json({
       ok: true,
       message: "Horas extra guardadas.",
       item: {
         username: employee.username,
-        name: employee.user.name,
+        name: employee.name,
         year: saved.year,
         month: saved.month,
         total: Number(saved.total),
