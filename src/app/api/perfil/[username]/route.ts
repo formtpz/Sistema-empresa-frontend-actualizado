@@ -84,7 +84,7 @@ export async function GET(
       },
       permisos,
     });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json(
       { message: "Error consultando perfil" },
       { status: 500 }
