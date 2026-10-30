@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { query, getPool } from "@/lib/db";
 
 type SessionUser = {
   username: string;
@@ -95,18 +96,12 @@ function parsePayload(body: HorasDiaInput) {
   };
 }
 
-async function getSupervisorTeam(username: string) {
-  const employees = await prisma.employee.findMany({
-    select: {
-      id: true,
-      username: true,
-      puesto: true,
-      supervisor: true,
-      user: { select: { name: true } },
-    },
-  });
-
-  return employees.filter((employee) => supervisorMatches(username, employee.supervisor));
+async function getSupervisorTeam(username:string){
+ const employees=await query<{id:number;username:string;puesto:string|null;supervisor:string|null;name:string}>(
+ "SELECT e.id,e.username,e.puesto,e.supervisor,u.name FROM public.employees e JOIN public.users u ON u.username=e.username");
+ return employees.filter(e=>supervisorMatches(username,e.supervisor)).map(e=>({
+ id:e.id,username:e.username,puesto:e.puesto,supervisor:e.supervisor,user:{name:e.name}
+ }));
 }
 
 async function recalculateMonthly(employeeId: number, year: number, month: number) {
