@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { query } from "@/lib/db";
 type Role = "ADMIN" | "RH" | "COORDINACION" | "OPERADOR" | "PM" | "GERENCIA";
 type ProjectCode = "COLOMBIA" | "PERU" | "ITALIA" | "GENERAL";
 
@@ -30,66 +31,22 @@ export async function GET() {
     return NextResponse.json({ message: "No autorizado" }, { status: 403 });
   }
 
-  const users = await prisma.user.findMany({
-    orderBy: [{ role: "asc" }, { username: "asc" }],
-    select: {
-      username: true,
-      name: true,
-      email: true,
-      role: true,
-      active: true,
-      created_at: true,
-      employee: {
-        select: {
-          supervisor: true,
-          puesto: true,
-          cedula: true,
-          vacaciones_saldo: true,
-          start_date: true,
-          project: { select: { code: true, name: true } },
-        },
-      },
-    },
-  });
-
-  const supervisorOptionsRaw = await prisma.employee.findMany({
-    where: {
-      OR: [
-        { puesto: { contains: "super", mode: "insensitive" } },
-        { puesto: { contains: "coord", mode: "insensitive" } },
-        { user: { role: { in: ["COORDINACION", "PM"] } } },
-      ],
-    },
-    orderBy: [{ user: { name: "asc" } }],
-    select: {
-      username: true,
-      user: { select: { name: true, role: true } },
-    },
-  });
-
-  const supervisorOptions = supervisorOptionsRaw.map((employee) => ({
-    username: employee.username,
-    name: employee.user.name || employee.username,
-    role: employee.user.role,
-  }));
+  const users = await query<{username:string;name:string;email:string|null;role:string;active:boolean;created_at:Date;supervisor:string|null;puesto:string|null;cedula:string|null;vacaciones_saldo:string|null;start_date:Date|null;projectCode:string|null;project:string|null}>(
+    'SELECT u.username,u.name,u.email,u.role,u.active,u.created_at,e.supervisor,e.puesto,e.cedula,e.vacaciones_saldo,e.start_date,p.code AS "projectCode",p.name AS project FROM public.users u LEFT JOIN public.employees e ON e.username=u.username LEFT JOIN public.projects p ON p.id=e."projectId" ORDER BY u.role,u.username'
+  );
+  const supervisorOptions = await query<{username:string;name:string;role:string}>(
+    "SELECT e.username,u.name,u.role FROM public.employees e JOIN public.users u ON u.username=e.username WHERE e.puesto ILIKE '%super%' OR e.puesto ILIKE '%coord%' OR u.role IN ('COORDINACION','PM') ORDER BY u.name"
+  );
 
   return NextResponse.json({
-    users: users.map((user) => ({
-      username: user.username,
-      name: user.name,
-      email: user.email ?? "",
-      role: user.role,
-      active: user.active,
-      created_at: user.created_at,
-      supervisor: user.employee?.supervisor ?? "",
-      puesto: user.employee?.puesto ?? "",
-      cedula: user.employee?.cedula ?? "",
-      vacaciones_saldo: Number(user.employee?.vacaciones_saldo ?? 0),
-      start_date: user.employee?.start_date?.toISOString().slice(0, 10) ?? "",
-      projectCode: user.employee?.project?.code ?? "",
-      project: user.employee?.project?.name ?? "",
+    users: users.map((user)=>({
+      username:user.username,name:user.name,email:user.email??"",role:user.role,active:user.active,
+      created_at:user.created_at,supervisor:user.supervisor??"",puesto:user.puesto??"",cedula:user.cedula??"",
+      vacaciones_saldo:Number(user.vacaciones_saldo??0),
+      start_date:user.start_date?new Date(user.start_date).toISOString().slice(0,10):"",
+      projectCode:user.projectCode??"",project:user.project??""
     })),
-    supervisorOptions,
+    supervisorOptions:supervisorOptions.map(e=>({username:e.username,name:e.name||e.username,role:e.role})),
   });
 }
 
