@@ -70,7 +70,7 @@ export async function GET(
     let vacacionesActual = Number(employee?.vacaciones_saldo ?? 0);
 
     if (employee?.start_date) {
-      const extra = monthsDiffByAnniversary(user.employee.start_date, corte, hoy);
+      const extra = monthsDiffByAnniversary(new Date(employee.start_date), corte, hoy);
       vacacionesActual += extra;
     }
 
@@ -86,7 +86,7 @@ export async function GET(
     });
   } catch (error: unknown) {
     return NextResponse.json(
-      { message: "Error consultando perfil", error: String(error) },
+      { message: "Error consultando perfil" },
       { status: 500 }
     );
   }
