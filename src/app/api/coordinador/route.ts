@@ -6,14 +6,14 @@ type TeamRow={username:string;name:string;email:string|null;role:string;active:b
 export async function GET(){
  const session=await getSession();
  if(!session)return NextResponse.json({message:"No autenticado"},{status:401});
- if(!["COORDINACION","ADMIN"].includes(session.role))return NextResponse.json({message:"No autorizado"},{status:403});
+ if(!(await query<{allowed:boolean}>("SELECT public.app_has_permission($1,$2) AS allowed",[session.username,"permissions.read_team"]))[0]?.allowed)return NextResponse.json({message:"No autorizado"},{status:403});
  try{
   const [current]=await query<{name:string}>("SELECT name FROM public.users WHERE username=$1",[session.username]);
   const name=current?.name??session.username;
   const equipo=await query<TeamRow>(
    "SELECT e.username,u.name,u.email,u.role,u.active,e.puesto,e.supervisor,e.start_date,e.vacaciones_saldo "+
    "FROM public.employees e JOIN public.users u ON u.username=e.username "+
-   "WHERE (NULLIF($1,'') IS NOT NULL AND e.supervisor ILIKE '%' || $1 || '%') OR e.supervisor ILIKE '%' || $2 || '%' "+
+   "WHERE (u.username=$2 OR public.app_can_access_request($2,e.username,'permissions.read_team')) "+
    "ORDER BY e.supervisor,e.username",[name,session.username]);
   return NextResponse.json({coordinador:{username:session.username,name},total:equipo.length,equipo:equipo.map(e=>({
    username:e.username,name:e.name||e.username,email:e.email??"",role:e.role,active:e.active,
