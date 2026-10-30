@@ -2,31 +2,8 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
-import { prisma } from "@/lib/prisma";
-import { PermisoEstado, PermisoTipo } from "@prisma/client";
-
-function getSecret() {
-  const secret = process.env.JWT_SECRET || "dev-secret";
-  return new TextEncoder().encode(secret);
-}
-
-async function getSession() {
-  const token = (await cookies()).get("session")?.value;
-  if (!token) return null;
-
-  try {
-    const { payload } = await jwtVerify(token, getSecret());
-    return {
-      username: String(payload.sub ?? ""),
-      role: String(payload.role ?? "").toUpperCase(),
-      name: String(payload.name ?? ""),
-    };
-  } catch {
-    return null;
-  }
-}
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
 
 function daysInclusive(startDate: Date, endDate: Date) {
   const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
@@ -65,24 +42,15 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id") ?? "";
 
-  const permiso = await prisma.permiso.findUnique({
-    where: { id },
-    include: {
-      user: {
-        include: {
-          employee: {
-            include: { project: true },
-          },
-        },
-      },
-    },
-  });
+  const [row] = await query<{id:string;username:string;tipo:string;estado:string;fecha_inicio:Date;fecha_fin:Date;motivo:string;user_name:string;puesto:string|null;vacaciones_saldo:string|null;project_name:string|null}>(
+    'SELECT p.id,p.username,p.tipo,p.estado,p.fecha_inicio,p.fecha_fin,p.motivo,u.name AS user_name,e.puesto,e.vacaciones_saldo,pr.name AS project_name FROM public.permisos p JOIN public.users u ON u.username=p.username LEFT JOIN public.employees e ON e.username=p.username LEFT JOIN public.projects pr ON pr.id=e."projectId" WHERE p.id=$1',[id]);
+  const permiso = row ? {...row,fecha_inicio:new Date(row.fecha_inicio),fecha_fin:new Date(row.fecha_fin),user:{name:row.user_name,employee:{puesto:row.puesto,vacaciones_saldo:row.vacaciones_saldo,project:{name:row.project_name}}}} : null;
 
   if (!permiso) return NextResponse.json({ message: "Permiso no encontrado." }, { status: 404 });
-  if (permiso.tipo !== PermisoTipo.VACACIONES) {
+  if (permiso.tipo !== "VACACIONES") {
     return NextResponse.json({ message: "Este documento aplica solo a Vacaciones." }, { status: 400 });
   }
-  if (permiso.estado !== PermisoEstado.APROBADO) {
+  if (permiso.estado !== "APROBADO") {
     return NextResponse.json({ message: "Solo se genera documento para solicitudes aprobadas." }, { status: 409 });
   }
 
