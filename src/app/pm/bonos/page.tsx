@@ -88,7 +88,7 @@ export default function BonosPage() {
   }, [period, project]);
 
   useEffect(() => {
-    void loadBonos();
+    void Promise.resolve().then(() => loadBonos());
   }, [loadBonos]);
 
   const totalBonos = useMemo(() => data?.total ?? 0, [data]);
