@@ -41,3 +41,8 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# Confidential local Excel seed files (never commit)
+/prisma/seed-data/
+/local-imports/
+*.xlsx
