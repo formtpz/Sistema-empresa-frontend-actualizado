@@ -85,7 +85,7 @@ export default function HorasExtraPage() {
   }, [period, project]);
 
   useEffect(() => {
-    void loadExtras();
+    void Promise.resolve().then(() => loadExtras());
   }, [loadExtras]);
 
   const totalHoras = useMemo(() => data?.totalHoras ?? 0, [data]);
