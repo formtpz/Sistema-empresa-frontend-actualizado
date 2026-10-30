@@ -1,83 +1,37 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireRoleFromRequest } from "@/lib/auth";
-import { parseProjectCode } from "@/lib/projects";
-
 export const runtime = "nodejs";
+import { NextResponse } from "next/server";
+import { query } from "@/lib/db";
+import { requireRoleFromRequest } from "@/lib/auth";
+
+type Project = { id: number; code: string; name: string };
+type EmployeeRow = { username:string; puesto:string|null; supervisor:string|null; start_date:Date|null; projectId:number|null; name:string; email:string|null; role:string; active:boolean };
+type CountRow = { label: string|null; count: number };
 
 export async function GET(req: Request) {
-  // ✅ Auth (solo PM/GERENCIA/ADMIN)
-  const auth = await requireRoleFromRequest(req, ["PM", "GERENCIA", "ADMIN"]);
-  if (!auth.ok) {
-    return NextResponse.json({ message: auth.message }, { status: auth.status });
-  }
-
+  const auth = await requireRoleFromRequest(req, ["PM","GERENCIA","ADMIN"]);
+  if (!auth.ok) return NextResponse.json({ message: auth.message }, { status: auth.status });
+  const code = (new URL(req.url).searchParams.get("project") ?? "GENERAL").toUpperCase();
+  if (!["GENERAL","COLOMBIA","PERU","ITALIA"].includes(code)) return NextResponse.json({ message: "Proyecto inválido" }, { status: 400 });
   try {
-    const { searchParams } = new URL(req.url);
-    const projectCode = (searchParams.get("project") || "GENERAL").toUpperCase();
-    const parsedProjectCode = parseProjectCode(projectCode);
-
-    const project =
-      projectCode === "GENERAL" || !parsedProjectCode
-        ? null
-        : await prisma.project.findUnique({
-            where: { code: parsedProjectCode },
-            select: { id: true, code: true, name: true },
-          });
-
-    const whereEmp = project ? { projectId: project.id } : {};
-
-    const employees = await prisma.employee.findMany({
-      where: whereEmp,
-      orderBy: [{ supervisor: "asc" }, { puesto: "asc" }, { username: "asc" }],
-      select: {
-        username: true,
-        puesto: true,
-        supervisor: true,
-        start_date: true,
-        projectId: true,
-        user: {
-          select: { name: true, email: true, role: true, active: true },
-        },
-      },
-    });
-
-    const porPuestoRaw = await prisma.employee.groupBy({
-      by: ["puesto"],
-      where: whereEmp,
-      _count: true,
-    });
-
-    const porPuesto = porPuestoRaw
-      .map((x) => ({
-        puesto: x.puesto || "SIN_PUESTO",
-        count: x._count,
-      }))
-      .sort((a, b) => b.count - a.count);
-
-    const porSupervisorRaw = await prisma.employee.groupBy({
-      by: ["supervisor"],
-      where: whereEmp,
-      _count: true,
-    });
-
-    const porSupervisor = porSupervisorRaw
-      .map((x) => ({
-        supervisor: x.supervisor || "SIN_SUPERVISOR",
-        count: x._count,
-      }))
-      .sort((a, b) => b.count - a.count);
-
+    const projects = code === "GENERAL" ? [] : await query<Project>("SELECT id,code,name FROM public.projects WHERE code::text=$1 LIMIT 1",[code]);
+    const project = projects[0] ?? null;
+    if (code !== "GENERAL" && !project) return NextResponse.json({ message: "Proyecto no encontrado" }, { status: 404 });
+    const filter = project ? 'WHERE e."projectId"=$1' : "";
+    const params = project ? [project.id] : [];
+    const rows = await query<EmployeeRow>(`SELECT e.username,e.puesto,e.supervisor,e.start_date,e."projectId",u.name,u.email,u.role,u.active
+      FROM public.employees e JOIN public.users u ON u.username=e.username ${filter}
+      ORDER BY e.supervisor NULLS FIRST,e.puesto NULLS FIRST,e.username`,params);
+    const countsPuesto = await query<CountRow>(`SELECT e.puesto AS label, COUNT(*)::int AS count FROM public.employees e ${filter} GROUP BY e.puesto ORDER BY count DESC`,params);
+    const countsSupervisor = await query<CountRow>(`SELECT e.supervisor AS label, COUNT(*)::int AS count FROM public.employees e ${filter} GROUP BY e.supervisor ORDER BY count DESC`,params);
     return NextResponse.json({
-      project: project ? project : { code: "GENERAL", name: "General" },
-      total: employees.length,
-      porPuesto,
-      porSupervisor,
-      employees,
+      project: project ?? { code:"GENERAL",name:"General" },
+      total: rows.length,
+      porPuesto: countsPuesto.map(x=>({puesto:x.label || "SIN_PUESTO",count:x.count})),
+      porSupervisor: countsSupervisor.map(x=>({supervisor:x.label || "SIN_SUPERVISOR",count:x.count})),
+      employees: rows.map(({name,email,role,active,...e})=>({...e,user:{name,email,role,active}}))
     });
-  } catch (err) {
-    console.error("PM PERSONAL ERROR:", err);
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ message: msg }, { status: 500 });
+  } catch (error) {
+    console.error("Error consultando personal:",error);
+    return NextResponse.json({ message:"Error consultando personal" },{status:500});
   }
 }
