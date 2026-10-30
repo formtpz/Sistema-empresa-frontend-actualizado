@@ -284,9 +284,6 @@ async function getEquipoHorasExtra(username: string, year?: number, month?: numb
   if(!latest)return buildEquipoHorasExtra(equipo,null,null,[]);
   const rows=await query<HorasExtraRow>(
     'SELECT "employeeId",total,ordinarias,feriados,diurnas,nocturnas,diurnas_feriado,nocturnas_feriado FROM public.horas_extra_mes WHERE "employeeId"=ANY($1::int[]) AND year=$2 AND month=$3',[employeeIds,latest.year,latest.month]);
-  return buildEquipoHorasExtra(equipo, null, null, []);
-  }
-
   return buildEquipoHorasExtra(equipo, latest.year, latest.month, rows);
 }
 
