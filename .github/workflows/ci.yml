@@ -4,6 +4,9 @@ on:
     branches: [main]
   push:
     branches: [refactor/postgres-etapa4]
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
