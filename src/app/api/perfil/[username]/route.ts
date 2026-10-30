@@ -47,7 +47,7 @@ export async function GET(
 
     const session = await getSession();
     if (!session) return NextResponse.json({message:"No autenticado"},{status:401});
-    if (session.username !== userNameDecoded && !["ADMIN","RH","COORDINACION","PM","GERENCIA"].includes(session.role))
+    if (session.username !== userNameDecoded && !(await query<{allowed:boolean}>("SELECT public.app_can_access_request($1,$2,$3) AS allowed",[session.username,userNameDecoded,"permissions.read_team"]))[0]?.allowed)
       return NextResponse.json({message:"No autorizado"},{status:403});
     const users = await query<{username:string;name:string;role:string}>(
       "SELECT username,name,role FROM public.users WHERE username=$1 LIMIT 1",[userNameDecoded]);

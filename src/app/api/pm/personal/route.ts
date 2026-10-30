@@ -1,14 +1,14 @@
 export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { requireRoleFromRequest } from "@/lib/auth";
+import { requirePermissionFromRequest } from "@/lib/auth";
 
 type Project = { id: number; code: string; name: string };
 type EmployeeRow = { username:string; puesto:string|null; supervisor:string|null; start_date:Date|null; projectId:number|null; name:string; email:string|null; role:string; active:boolean };
 type CountRow = { label: string|null; count: number };
 
 export async function GET(req: Request) {
-  const auth = await requireRoleFromRequest(req, ["PM","GERENCIA","ADMIN"]);
+  const auth = await requirePermissionFromRequest(req, "reports.read_all");
   if (!auth.ok) return NextResponse.json({ message: auth.message }, { status: auth.status });
   const code = (new URL(req.url).searchParams.get("project") ?? "GENERAL").toUpperCase();
   if (!["GENERAL","COLOMBIA","PERU","ITALIA"].includes(code)) return NextResponse.json({ message: "Proyecto inválido" }, { status: 400 });
