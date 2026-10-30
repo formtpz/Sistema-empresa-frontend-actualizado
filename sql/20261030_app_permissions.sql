@@ -18,7 +18,10 @@ INSERT INTO public.app_permissions(code,description) VALUES
  ('permissions.create_own','Create own requests'),
  ('permissions.read_team','Read requests within authorized team'),
  ('permissions.decide_team','Approve or reject requests within authorized team'),
- ('users.manage','Manage application users')
+ ('users.manage','Manage application users'),
+ ('reports.read_all','Read project-level reports and employee financial data'),
+ ('reports.read_own','Read own bonus and overtime reports'),
+ ('projects.read','Read project summaries')
 ON CONFLICT(code) DO NOTHING;
 
 INSERT INTO public.app_role_permissions(role,permission_code) VALUES
@@ -29,7 +32,10 @@ INSERT INTO public.app_role_permissions(role,permission_code) VALUES
  ('COORDINACION','permissions.read_team'),('COORDINACION','permissions.decide_team'),
  ('OPERADOR','permissions.read_own'),('OPERADOR','permissions.create_own'),
  ('PM','permissions.read_own'),('PM','permissions.create_own'),
- ('GERENCIA','permissions.read_team')
+ ('GERENCIA','permissions.read_team'),
+ ('ADMIN','reports.read_all'),('PM','reports.read_all'),('GERENCIA','reports.read_all'),
+ ('ADMIN','reports.read_own'),('PM','reports.read_own'),('OPERADOR','reports.read_own'),('COORDINACION','reports.read_own'),
+ ('ADMIN','projects.read'),('PM','projects.read'),('GERENCIA','projects.read')
 ON CONFLICT DO NOTHING;
 
 -- SECURITY INVOKER: no privilege escalation; requires backend role with SELECT.
