@@ -73,10 +73,14 @@ export async function POST(req: Request) {
   const puesto = String(body?.puesto ?? "").trim();
   const vacacionesSaldo = Number(body?.vacaciones_saldo ?? 0);
   const startDate = parseDate(body?.start_date);
+  const rawStartDate = String(body?.start_date ?? "").trim();
   const projectCode = String(body?.projectCode ?? "").trim().toUpperCase();
 
   if (!username || !name || !isRole(userRole) || typeof active !== "boolean" || !Number.isFinite(vacacionesSaldo) || password.length > 1024) {
     return NextResponse.json({ message: "Faltan datos." }, { status: 400 });
+  }
+  if (rawStartDate && !startDate) {
+    return NextResponse.json({ message: "Fecha de ingreso invalida." }, { status: 400 });
   }
   if (projectCode && !isProjectCode(projectCode)) {
     return NextResponse.json({ message: "Proyecto invalido." }, { status: 400 });
@@ -104,6 +108,10 @@ export async function POST(req: Request) {
       ? await client.query<{id:number}>('SELECT id FROM public.projects WHERE code=$1::public."ProjectCode"',[parsedProjectCode])
       : null;
     const projectId = project?.rows[0]?.id ?? null;
+    if (parsedProjectCode && !projectId) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ message: "El proyecto no existe en la base de datos." }, { status: 400 });
+    }
     const employee = await client.query("SELECT id FROM public.employees WHERE username=$1",[username]);
     const shouldHaveEmployee = Boolean(employee.rowCount || supervisor || cedula || puesto || projectId ||
       userRole==="OPERADOR" || userRole==="COORDINACION");
