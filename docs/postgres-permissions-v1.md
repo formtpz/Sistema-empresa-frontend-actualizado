@@ -63,3 +63,15 @@
 - `api/debut/db` requiere ahora `users.manage`; `api/debug-env` responde 404.
 - PENDIENTE CRÍTICO: rutas `api/operador` y `api/operador/horas-extra-dia` escriben horas de empleados con comprobación de supervisor mediante coincidencias parciales de texto. Sustituir por autorización de equipo estricta y permiso específico antes del merge.
 - PENDIENTE: verificar build, pruebas negativas de acceso y las reglas RLS; no desplegar todavía.
+
+## Diseño de jerarquía y pendientes históricos (fase de esquema)
+Migración nueva: `sql/20261030_employee_assignments.sql`, posterior a `sql/20261030_app_permissions.sql`.
+- `employee_assignments`: asignaciones con intervalo de vigencia, sin solapamientos por empleado; no se migra automáticamente el campo libre `employees.supervisor`.
+- `project_memberships`: alcance por proyecto de coordinadores y otros usuarios.
+- `app_user_permission_overrides`: permisos individuales; la denegación explícita prevalece sobre el rol.
+- `report_responsibilities`: un responsable abierto por reporte, incluso tras cambiar el supervisor del empleado.
+- `report_audit_log`: eventos de responsabilidad y modificaciones.
+- `app_can_access_project` y `app_can_work_report`: funciones de autorización iniciales; NO sustituyen las comprobaciones de estado, pertenencia real del reporte y bloqueo transaccional.
+Regla acordada: supervisor anterior conserva solo pendientes expresamente asignados; el acceso excepcional termina al cerrar/reasignar el reporte o revocar el permiso. El coordinador ve el proyecto completo.
+Pendientes de implementación: añadir rol funcional SUPERVISOR sin alterar roles actuales; poblar asignaciones mediante reconciliación supervisada; ligar cada módulo a responsabilidades reales y permisos de lectura/escritura; cerrar responsabilidades en la misma transacción que los reportes; asegurar transferencias atómicas, auditoría inmutable, RLS/grants del backend y pruebas de cambios de proyecto.
+No aplicar en producción: aún es esquema preparatorio, no hay pruebas en una base real ni integración completa con rutas.
