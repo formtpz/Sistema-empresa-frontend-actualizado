@@ -7,7 +7,7 @@ type Row = { nombre:string; personal_total:number; activos:number; operadores:nu
 export async function GET() {
   const session=await getSession();
   if(!session)return NextResponse.json({message:"No autenticado"},{status:401});
-  if(!["GERENCIA","PM","ADMIN"].includes(session.role))return NextResponse.json({message:"No autorizado"},{status:403});
+  if(!(await query<{allowed:boolean}>("SELECT public.app_has_permission($1,$2) AS allowed",[session.username,"projects.read"]))[0]?.allowed)return NextResponse.json({message:"No autorizado"},{status:403});
   try {
     const proyectos=await query<Row>(
       "SELECT p.name AS nombre, COUNT(e.id)::int AS personal_total, "+
