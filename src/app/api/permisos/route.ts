@@ -4,12 +4,12 @@ import { query } from "@/lib/db";
 import { getSession } from "@/lib/session";
 
 const tipos = new Set(["VACACIONES", "PERSONAL", "MEDICO", "TRAMITE", "OTRO"]);
-function restricted(role: string) { return role === "RH" || role === "GERENCIA"; }
+async function permitted(username: string, code: string) { const [r] = await query<{allowed:boolean}>("SELECT public.app_has_permission($1,$2) AS allowed",[username,code]); return r?.allowed === true; }
 
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  if (restricted(session.role)) return NextResponse.json({ message: "Este perfil no tiene solicitudes personales de permisos." }, { status: 403 });
+  if (!(await permitted(session.username, "permissions.read_own"))) return NextResponse.json({ message: "Este perfil no tiene solicitudes personales de permisos." }, { status: 403 });
   try {
     const permisos = await query("SELECT * FROM public.permisos WHERE username=$1 ORDER BY created_at DESC", [session.username]);
     return NextResponse.json({ permisos });
@@ -21,7 +21,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ message: "No autenticado" }, { status: 401 });
-  if (restricted(session.role)) return NextResponse.json({ message: "Este perfil no puede solicitar permisos personales." }, { status: 403 });
+  if (!(await permitted(session.username, "permissions.create_own"))) return NextResponse.json({ message: "Este perfil no puede solicitar permisos personales." }, { status: 403 });
   const body = await req.json().catch(() => null);
   const tipo = String(body?.tipo ?? "OTRO").toUpperCase();
   const inicio = String(body?.fecha_inicio ?? "");
